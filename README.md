@@ -1,4 +1,4 @@
-![Chunkis Logo](file:///C:/Users/Liparakis/.gemini/antigravity/brain/b744a28c-38a2-425f-83d1-252a18eba79b/chunkis_logo_png_1769019604697.png)
+<img src="assets/logo.png" width="150" alt="Chunkis Logo" style="border-radius: 50%;">
 
 # Chunkis
 
