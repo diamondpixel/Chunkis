@@ -16,7 +16,8 @@ import java.util.List;
 
 /**
  * High-performance decoder for the Chunkis format.
- * Refactored to eliminate stream overhead and reduce GC pressure during chunk loading.
+ * Refactored to eliminate stream overhead and reduce GC pressure during chunk
+ * loading.
  */
 public class CisDecoder {
 
@@ -35,14 +36,17 @@ public class CisDecoder {
         int offset = 0;
 
         // 1. Header Checks
-        if (data.length < 8) throw new IOException("CIS file too short");
+        if (data.length < 8)
+            throw new IOException("CIS file too short");
 
-        int magic = readIntBE(data, offset); offset += 4;
+        int magic = readIntBE(data, offset);
+        offset += 4;
         if (magic != CisConstants.MAGIC) {
             throw new IOException("Invalid CIS4 Magic");
         }
 
-        int version = readIntBE(data, offset); offset += 4;
+        int version = readIntBE(data, offset);
+        offset += 4;
         if (version != CisConstants.VERSION) {
             throw new IOException("Unsupported CIS version: " + version);
         }
@@ -51,28 +55,35 @@ public class CisDecoder {
         Palette<BlockState> palette = delta.getBlockPalette();
 
         // 2. Global Palette (Mapping IDs + Facing Data)
-        int globalPaletteSize = readIntBE(data, offset); offset += 4;
+        int globalPaletteSize = readIntBE(data, offset);
+        offset += 4;
 
         // Pre-allocate list to exact size to avoid resizing
         List<BlockState> globalPaletteList = new ArrayList<>(globalPaletteSize);
 
         for (int i = 0; i < globalPaletteSize; i++) {
-            int mappingId = readShortBE(data, offset) & 0xFFFF; offset += 2;
+            int mappingId = readShortBE(data, offset) & 0xFFFF;
+            offset += 2;
             byte facingData = data[offset++];
 
             BlockState state = mapping.getBlockState(mappingId, facingData);
+
             globalPaletteList.add(state);
             palette.getOrAdd(state);
         }
 
         // 3. Instructions
-        int instLength = readIntBE(data, offset); offset += 4;
+        int instLength = readIntBE(data, offset);
+        offset += 4;
 
-        // Zero-copy: Use a sub-view logic or just pass offset/length if BitReader supports it.
+        // Zero-copy: Use a sub-view logic or just pass offset/length if BitReader
+        // supports it.
         // Current BitReader takes a byte array. For safety and API boundaries,
         // we might create a subarray here, OR refactor BitReader to support offsets.
-        // For now, assuming the BitReader takes a raw array, let's just pass the whole array
-        // and add an offset capability to BitReader, or simple System.arraycopy for safety.
+        // For now, assuming the BitReader takes a raw array, let's just pass the whole
+        // array
+        // and add an offset capability to BitReader, or simple System.arraycopy for
+        // safety.
         // Optimization: System.arraycopy is very fast intrinsic.
         byte[] instData = new byte[instLength];
         System.arraycopy(data, offset, instData, 0, instLength);
@@ -83,12 +94,13 @@ public class CisDecoder {
 
         // 4. Block Entities
         // Only wrap in DataInputStream for NBT reading if we actually have BEs.
-        int beCount = readIntBE(data, offset); offset += 4;
+        int beCount = readIntBE(data, offset);
+        offset += 4;
 
         if (beCount > 0) {
             // Create the stream starting exactly where we are
             try (ByteArrayInputStream bais = new ByteArrayInputStream(data, offset, data.length - offset);
-                 DataInputStream dis = new DataInputStream(bais)) {
+                    DataInputStream dis = new DataInputStream(bais)) {
 
                 for (int i = 0; i < beCount; i++) {
                     byte x = dis.readByte();
@@ -113,7 +125,8 @@ public class CisDecoder {
             int sectionY = reader.readZigZag(CisConstants.SECTION_Y_BITS);
 
             // Unrolled loop for 64 Micro-Cubes (4x4x4)
-            // Flattening this removes loop overhead, though micro-cubes are data-driven anyway.
+            // Flattening this removes loop overhead, though micro-cubes are data-driven
+            // anyway.
             // Keeping nested loops for clarity as the JIT unrolls this effectively.
             for (int my = 0; my < 4; my++) {
                 for (int mz = 0; mz < 4; mz++) {
@@ -126,13 +139,15 @@ public class CisDecoder {
     }
 
     private void decodeMicroCube(BitReader reader, ChunkDelta delta, int sectionY, int mx, int my, int mz,
-                                 List<BlockState> globalPalette) {
+            List<BlockState> globalPalette) {
         // 1. Local Palette Header
         int paletteSize = (int) reader.read(CisConstants.PALETTE_SIZE_BITS);
-        if (paletteSize == 0) return;
+        if (paletteSize == 0)
+            return;
 
         // 2. Read Local IDs
-        // Optimization: Reuse the class-level paletteBuffer instead of allocating `new int[]`
+        // Optimization: Reuse the class-level paletteBuffer instead of allocating `new
+        // int[]`
         // We only need to clear or overwrite it.
         if (paletteSize > paletteBuffer.length) {
             // Should arguably never happen if PALETTE_SIZE_BITS constraints it,
@@ -204,7 +219,8 @@ public class CisDecoder {
     // --- Helpers ---
 
     private void handleCorruption(int mx, int my, int mz, int sectionY, int blockIndex, int count, int lid, int size) {
-        String msg = String.format("CIS Decode Error: LID %d out of bounds (size %d) at MicroCube [%d,%d,%d] SectionY=%d Block %d/%d",
+        String msg = String.format(
+                "CIS Decode Error: LID %d out of bounds (size %d) at MicroCube [%d,%d,%d] SectionY=%d Block %d/%d",
                 lid, size, mx, my, mz, sectionY, blockIndex, count);
         io.liparakis.chunkis.ChunkisMod.LOGGER.error(msg);
         throw new ArrayIndexOutOfBoundsException(msg);

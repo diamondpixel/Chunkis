@@ -37,7 +37,8 @@ public class ChunkSerializerMixin {
 
         ChunkDelta delta = duck.chunkis$getDelta();
 
-        // Heuristic: Only save as Chunkis if dirty, non-empty, and below instruction threshold
+        // Heuristic: Only save as Chunkis if dirty, non-empty, and below instruction
+        // threshold
         if (!delta.isDirty() || delta.isEmpty()) {
             return;
         }
@@ -74,7 +75,7 @@ public class ChunkSerializerMixin {
 
     @Inject(method = "deserialize", at = @At("RETURN"))
     private static void chunkis$onDeserialize(ServerWorld world, PointOfInterestStorage poiStorage, StorageKey key,
-                                              ChunkPos pos, NbtCompound nbt, CallbackInfoReturnable<ProtoChunk> cir) {
+            ChunkPos pos, NbtCompound nbt, CallbackInfoReturnable<ProtoChunk> cir) {
 
         if (!nbt.contains(CHUNKIS_DATA_KEY)) {
             return;

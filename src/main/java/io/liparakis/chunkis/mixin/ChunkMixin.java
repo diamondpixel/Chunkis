@@ -10,7 +10,6 @@ import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.chunk.ChunkSection;
 import net.minecraft.world.chunk.ProtoChunk;
 import net.minecraft.world.chunk.WorldChunk;
 import net.minecraft.world.chunk.ChunkStatus;
@@ -44,12 +43,17 @@ public class ChunkMixin implements ChunkisDeltaDuck {
     private void chunkis$onSetBlockState(BlockPos pos, BlockState state, boolean moved,
             CallbackInfoReturnable<BlockState> cir) {
 
+        WorldChunk self = (WorldChunk) (Object) this;
+
+        // Strictly ignore Client-side changes (Visuals, Prediction, Sync)
+        if (self.getWorld().isClient()) {
+            return;
+        }
+
         // Fast path: early exit checks
         if (chunkis$isRestoring || cir.getReturnValue() == null) {
             return;
         }
-
-        WorldChunk self = (WorldChunk) (Object) this;
 
         // Fast path: status check
         if (!ChunkStatus.FULL.equals(self.getStatus())) {
@@ -98,25 +102,12 @@ public class ChunkMixin implements ChunkisDeltaDuck {
 
     @Unique
     private void chunkis$applyInstructions(ServerWorld world, WorldChunk chunk, ChunkDelta protoDelta) {
-        ChunkSection[] sections = chunk.getSectionArray();
         Palette<BlockState> sourcePalette = protoDelta.getBlockPalette();
-        Palette<BlockState> targetPalette = chunkis$delta.getBlockPalette();
         List<BlockInstruction> instructions = protoDelta.getBlockInstructions();
 
         int instructionCount = instructions.size();
         if (instructionCount == 0)
             return;
-
-        // Cache world boundaries
-        int bottomY = world.getBottomY();
-        int topY = world.getTopY();
-        int sectionCount = sections.length;
-
-        // Pre-build target palette
-        List<BlockState> sourceStates = sourcePalette.getAll();
-        for (BlockState state : sourceStates) {
-            targetPalette.getOrAdd(state != null ? state : net.minecraft.block.Blocks.AIR.getDefaultState());
-        }
 
         // Apply instructions
         for (int i = 0; i < instructionCount; i++) {
@@ -126,35 +117,30 @@ public class ChunkMixin implements ChunkisDeltaDuck {
             if (state == null)
                 continue;
 
-            int y = ins.y();
-            if (y < bottomY || y >= topY)
-                continue;
-
-            int sectionIndex = chunk.getSectionIndex(y);
-            if (sectionIndex < 0 || sectionIndex >= sectionCount)
-                continue;
-
-            ChunkSection section = sections[sectionIndex];
-            if (section == null)
-                continue;
+            BlockPos pos = chunk.getPos().getBlockPos(ins.x(), ins.y(), ins.z());
 
             try {
-                // Set block state
-                section.setBlockState(ins.x() & COORD_MASK, y & COORD_MASK, ins.z() & COORD_MASK, state);
+                // Set block state using chunk's high-level method to ensure BE metadata and
+                // lighting
+                // updates
+                chunk.setBlockState(pos, state, false);
+
+                if (state.getBlock().toString().contains("chest")) {
+                    io.liparakis.chunkis.ChunkisMod.LOGGER.info("Chunkis Debug: Restored {} at {}", state.getBlock(),
+                            pos);
+                }
 
                 // Copy to target delta
-                chunkis$delta.addBlockChange(ins.x(), y, ins.z(), state);
+                chunkis$delta.addBlockChange(ins.x(), ins.y(), ins.z(), state);
 
             } catch (Throwable t) {
-                if (i == 0) {
-                    io.liparakis.chunkis.ChunkisMod.LOGGER.error(
-                            "Failed to restore block at {},{},{} in chunk {}",
-                            ins.x(), y, ins.z(), chunk.getPos(), t);
-                }
+                io.liparakis.chunkis.ChunkisMod.LOGGER.error(
+                        "Failed to restore block at {} in chunk {}",
+                        pos, chunk.getPos(), t);
             }
         }
 
-        // Separate pass: Restore Block Entities independently
+        // Separate pass: Restore Block Entities independently (Inventory, etc.)
         var blockEntities = protoDelta.getBlockEntities();
         if (blockEntities != null && !blockEntities.isEmpty()) {
             try {
@@ -175,11 +161,21 @@ public class ChunkMixin implements ChunkisDeltaDuck {
                         BlockEntity be = BlockEntity.createFromNbt(worldPos, currentState, nbt,
                                 world.getRegistryManager());
                         if (be != null) {
+                            chunk.removeBlockEntity(worldPos);
                             chunk.addBlockEntity(be);
+
+                            if (currentState.getBlock().toString().contains("chest")) {
+                                io.liparakis.chunkis.ChunkisMod.LOGGER.info(
+                                        "Chunkis Debug: Restored Content for {} at {}", currentState.getBlock(),
+                                        worldPos);
+                            }
 
                             // Copy to target delta so it persists on next save
                             chunkis$delta.addBlockEntityData(x, y, z, nbt);
                         }
+                    } else if (currentState.getBlock().toString().contains("chest")) {
+                        io.liparakis.chunkis.ChunkisMod.LOGGER
+                                .warn("Chunkis Debug: Chest at {} missing BE flag! State: {}", worldPos, currentState);
                     }
                 }
             } catch (Throwable t) {

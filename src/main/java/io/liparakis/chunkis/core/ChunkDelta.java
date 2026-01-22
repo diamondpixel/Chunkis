@@ -18,7 +18,8 @@ import java.util.List;
 
 /**
  * High-performance storage for modified block data within a chunk.
- * Optimized with primitive collections to prevent GC pressure and casting errors.
+ * Optimized with primitive collections to prevent GC pressure and casting
+ * errors.
  */
 public class ChunkDelta {
     private static final int NBT_COMPOUND_TYPE = 10;
@@ -74,7 +75,8 @@ public class ChunkDelta {
     }
 
     public void addBlockEntityData(int x, int y, int z, NbtCompound nbt) {
-        if (nbt == null || nbt.isEmpty()) return;
+        if (nbt == null || nbt.isEmpty())
+            return;
 
         long key = BlockInstruction.packPos(x, y, z);
         if (blockEntities == null) {
@@ -93,7 +95,8 @@ public class ChunkDelta {
     }
 
     /**
-     * Returns the fastutil-specific map to ensure CisEncoder can iterate without boxing.
+     * Returns the fastutil-specific map to ensure CisEncoder can iterate without
+     * boxing.
      */
     public Long2ObjectMap<NbtCompound> getBlockEntities() {
         return blockEntities == null ? Long2ObjectMaps.emptyMap() : blockEntities;
@@ -111,10 +114,21 @@ public class ChunkDelta {
         return blockPalette;
     }
 
-    public boolean isDirty() { return isDirty; }
-    public void markDirty() { this.isDirty = true; }
-    public void markSaved() { this.isDirty = false; }
-    public int size() { return instructionCount; }
+    public boolean isDirty() {
+        return isDirty;
+    }
+
+    public void markDirty() {
+        this.isDirty = true;
+    }
+
+    public void markSaved() {
+        this.isDirty = false;
+    }
+
+    public int size() {
+        return instructionCount;
+    }
 
     public boolean isEmpty() {
         return instructionCount == 0 && (blockEntities == null || blockEntities.isEmpty());
@@ -198,8 +212,10 @@ public class ChunkDelta {
         if (tag.contains(BLOCK_ENTITIES_KEY, 9)) {
             NbtList beList = tag.getList(BLOCK_ENTITIES_KEY, NBT_COMPOUND_TYPE);
             if (!beList.isEmpty()) {
-                if (blockEntities == null) blockEntities = new Long2ObjectOpenHashMap<>(beList.size());
-                else blockEntities.clear();
+                if (blockEntities == null)
+                    blockEntities = new Long2ObjectOpenHashMap<>(beList.size());
+                else
+                    blockEntities.clear();
 
                 for (int i = 0; i < beList.size(); i++) {
                     NbtCompound entry = beList.getCompound(i);

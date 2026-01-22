@@ -56,7 +56,11 @@ public record BlockInstruction(byte x, int y, byte z, int paletteIndex) {
     }
 
     public static int unpackY(long packed) {
-        return (int) ((packed >> 12) & 0xFFFFF);
+        int y = (int) ((packed >> 12) & 0xFFFFF);
+        if ((y & 0x80000) != 0) { // Sign bit for 20-bit
+            y |= 0xFFF00000;
+        }
+        return y;
     }
 
     public static int unpackZ(long packed) {

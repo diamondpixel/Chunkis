@@ -9,6 +9,9 @@ Traditional Minecraft storage saves every single block in a chunk, including tho
 
 By only persisting "Deltas" (changes relative to the world generator), Chunkis files are often **90-95% smaller** than vanilla files while maintaining bit-perfect accuracy for player-placed blocks, inventories, and states.
 
+> [!IMPORTANT]
+> **Beta Stage**: Currently only supports Single Player / Client-side worlds. Dedicated Server support is planned. Always backup your world!
+
 ---
 
 ## ✨ Key Features

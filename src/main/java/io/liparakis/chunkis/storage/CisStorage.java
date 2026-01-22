@@ -42,7 +42,10 @@ public final class CisStorage {
         try {
             byte[] rawData = CisEncoder.encode(delta, mapping);
             byte[] compressedData = compressionContext.get().compress(rawData);
-            getRegionFile(pos).write(pos, compressedData);
+
+            RegionFile rf = getRegionFile(pos);
+            rf.write(pos, compressedData);
+
             delta.markSaved();
         } catch (IOException e) {
             io.liparakis.chunkis.ChunkisMod.LOGGER.error("Failed to save CIS chunk {}", pos, e);
@@ -51,7 +54,8 @@ public final class CisStorage {
 
     public ChunkDelta load(ChunkPos pos) {
         try {
-            byte[] compressedData = getRegionFile(pos).read(pos);
+            RegionFile rf = getRegionFile(pos);
+            byte[] compressedData = rf.read(pos);
             if (compressedData == null)
                 return new ChunkDelta();
 

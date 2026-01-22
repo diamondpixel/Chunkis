@@ -49,7 +49,9 @@ public final class CisEncoder {
         dos.writeInt(states.size());
         for (int i = 0; i < states.size(); i++) {
             BlockState state = states.get(i);
-            dos.writeShort(mapping.getBlockId(state));
+            int mappingId = mapping.getBlockId(state);
+
+            dos.writeShort(mappingId);
             dos.writeByte(mapping.getPackedStateData(state));
             ctx.globalIdMap.put(state, i);
         }
