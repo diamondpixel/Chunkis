@@ -10,20 +10,22 @@ import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.registry.Registries;
-import net.minecraft.state.property.Properties;
 import net.minecraft.state.property.Property;
 import net.minecraft.util.Identifier;
-import net.minecraft.util.math.Direction;
 
 import java.io.FileReader;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 
 /**
  * Optimized mapping system for block translation.
- * Uses Reference maps for Block objects to avoid String-based hashing in the
- * hot path.
+ * V5: Uses lossless property-based serialization instead of fixed 8-bit
+ * packing.
+ * Ensures deterministic bitstream generation.
  */
 public class CisMapping {
     private static final Gson GSON = new Gson();
@@ -32,12 +34,13 @@ public class CisMapping {
     private final Reference2IntMap<Block> blockToId = new Reference2IntOpenHashMap<>();
     private final Int2ObjectMap<Block> idToBlock = new Int2ObjectOpenHashMap<>();
 
-    // Cache for Direction properties to avoid repeated state manager scanning
-    private final Int2ObjectMap<Property<Direction>> directionPropertyCache = new Int2ObjectOpenHashMap<>();
+    // Cache property metadata per block ID for fast encode/decode
+    private final Int2ObjectMap<PropertyMeta[]> propertyMetaCache = new Int2ObjectOpenHashMap<>();
 
     private final Path mappingFilePath;
     private int nextId = 0;
     private final Object lock = new Object();
+    private final java.util.concurrent.locks.ReadWriteLock rwl = new java.util.concurrent.locks.ReentrantReadWriteLock();
 
     public CisMapping(Path mappingFile) throws IOException {
         this.mappingFilePath = mappingFile;
@@ -52,12 +55,11 @@ public class CisMapping {
                         Identifier id = Identifier.tryParse(entry.getKey());
                         if (id != null) {
                             Block block = Registries.BLOCK.get(id);
-                            // Ensure we map AIR to 0 explicitly if present, or handle it
                             if (block != Blocks.AIR || entry.getKey().equals("minecraft:air")) {
                                 int val = entry.getValue();
                                 blockToId.put(block, val);
                                 idToBlock.put(val, block);
-                                cacheDirectionProperty(block, val);
+                                cachePropertyMeta(block, val);
                                 if (val >= nextId)
                                     nextId = val + 1;
                             }
@@ -70,43 +72,64 @@ public class CisMapping {
         io.liparakis.chunkis.ChunkisMod.LOGGER.info("Chunkis Debug: Loaded global mappings: {} entries",
                 blockToId.size());
 
-        // Ensure AIR is always mapped to 0 if not present
+        io.liparakis.chunkis.ChunkisMod.LOGGER.info("Chunkis Debug: Loaded global mappings: {} entries",
+                blockToId.size());
+
+        // Ensure AIR is always mapped.
+        // Use nextId to avoid overwriting existing mappings (like Stone=0) which causes
+        // bitstream desync.
         if (blockToId.getInt(Blocks.AIR) == -1) {
-            registerBlock(Blocks.AIR, 0);
-            if (nextId == 0)
-                nextId = 1;
+            io.liparakis.chunkis.ChunkisMod.LOGGER
+                    .info("Chunkis Debug: Air missing from mappings, registering at ID {}", nextId);
+            registerBlock(Blocks.AIR, nextId);
+            nextId++;
+            // Force save since we modified the map on load
+            flush();
         }
     }
 
     /**
-     * Pre-calculates which property controls 'facing' for a block ID to avoid
-     * per-tick loops.
+     * Pre-calculates property metadata for a block to enable fast bit-packing.
+     * Sorts properties by name to ensure deterministic bitstream order consistently
+     * across runs/JVMs.
      */
-    private void cacheDirectionProperty(Block block, int id) {
-        for (Property<?> prop : block.getStateManager().getProperties()) {
-            if (prop.getType() == Direction.class) {
-                // Prioritize standard facing properties
-                if (prop == Properties.FACING || prop == Properties.HORIZONTAL_FACING) {
-                    directionPropertyCache.put(id, (Property<Direction>) prop);
-                    return;
-                }
-                // Fallback for custom properties (like 'axis' or 'orientation')
-                directionPropertyCache.put(id, (Property<Direction>) prop);
-            }
+    private void cachePropertyMeta(Block block, int id) {
+        Collection<Property<?>> props = block.getStateManager().getProperties();
+        if (props.isEmpty()) {
+            propertyMetaCache.put(id, new PropertyMeta[0]);
+            return;
         }
+
+        // SORT PROPERTIES BY NAME TO ENSURE DETERMINISTIC ORDER
+        List<Property<?>> sortedProps = new ArrayList<>(props);
+        sortedProps.sort((p1, p2) -> p1.getName().compareTo(p2.getName()));
+
+        List<PropertyMeta> metas = new ArrayList<>(sortedProps.size());
+        for (Property<?> prop : sortedProps) {
+            metas.add(new PropertyMeta(prop));
+        }
+        propertyMetaCache.put(id, metas.toArray(new PropertyMeta[0]));
     }
 
     public int getBlockId(BlockState state) {
         Block block = state.getBlock();
-        int id = blockToId.getInt(block);
 
-        if (id != -1) {
-            return id;
+        // Fast path with Read Lock
+        rwl.readLock().lock();
+        try {
+            int id = blockToId.getInt(block);
+            if (id != -1) {
+                return id;
+            }
+        } finally {
+            rwl.readLock().unlock();
         }
 
-        // Double-checked locking for new block registration
-        synchronized (lock) {
-            id = blockToId.getInt(block);
+        // Write Lock for registration
+        rwl.writeLock().lock();
+        try {
+            // Double-check under write lock
+            int id = blockToId.getInt(block);
             if (id != -1)
                 return id;
 
@@ -114,288 +137,226 @@ public class CisMapping {
             io.liparakis.chunkis.ChunkisMod.LOGGER.info("Chunkis Debug: Registering new block {} with ID {}", block,
                     id);
             registerBlock(block, id);
-            save(); // Persist immediately to avoid desync
+            // Removed synchronous save() to prevent WorldGen hang
 
             return id;
+        } finally {
+            rwl.writeLock().unlock();
         }
     }
 
     private void registerBlock(Block block, int id) {
         blockToId.put(block, id);
         idToBlock.put(id, block);
-        cacheDirectionProperty(block, id);
+        cachePropertyMeta(block, id);
     }
 
-    private void save() {
-        // Collect map for JSON
-        Map<String, Integer> map = new java.util.HashMap<>();
-        for (Int2ObjectMap.Entry<Block> entry : idToBlock.int2ObjectEntrySet()) {
-            Identifier id = Registries.BLOCK.getId(entry.getValue());
-            map.put(id.toString(), entry.getIntKey());
+    private int savedCount = 0;
+
+    public void flush() {
+        // Fast check without lock (volatile read of size? no, size() isn't volatile
+        // usually but safe enough for "eventual")
+        if (blockToId.size() <= savedCount) {
+            return;
         }
 
-        try (java.io.FileWriter writer = new java.io.FileWriter(mappingFilePath.toFile())) {
-            GSON.toJson(map, writer);
-            io.liparakis.chunkis.ChunkisMod.LOGGER.info("Chunkis Debug: Saved global_ids.json with {} entries",
-                    map.size());
-        } catch (Exception e) {
-            io.liparakis.chunkis.ChunkisMod.LOGGER.error("Chunkis Debug: Failed to save mappings!", e);
+        Map<String, Integer> snapshot = new java.util.HashMap<>();
+        int currentSize;
+
+        rwl.readLock().lock();
+        try {
+            if (blockToId.size() <= savedCount)
+                return; // Double check
+
+            // Create snapshot to minimize locking time
+            for (Int2ObjectMap.Entry<Block> entry : idToBlock.int2ObjectEntrySet()) {
+                Identifier id = Registries.BLOCK.getId(entry.getValue());
+                snapshot.put(id.toString(), entry.getIntKey());
+            }
+            currentSize = blockToId.size();
+        } finally {
+            rwl.readLock().unlock();
+        }
+
+        // Write IO outside the lock
+        synchronized (lock) {
+            if (currentSize <= savedCount)
+                return;
+
+            try (java.io.FileWriter writer = new java.io.FileWriter(mappingFilePath.toFile())) {
+                GSON.toJson(snapshot, writer);
+                savedCount = currentSize;
+                io.liparakis.chunkis.ChunkisMod.LOGGER.info("Chunkis Debug: Flushed global_ids.json ({} entries)",
+                        currentSize);
+            } catch (Exception e) {
+                io.liparakis.chunkis.ChunkisMod.LOGGER.error("Chunkis Debug: Failed to save mappings!", e);
+            }
+        }
+    }
+
+    // ==================== V5: Dynamic Property Bit-Packing ====================
+
+    /**
+     * Writes all property values of a BlockState to the BitWriter.
+     * Each property is written using the minimum bits required for its value range.
+     *
+     * @param writer BitWriter to write to
+     * @param state  BlockState to serialize
+     */
+    public void writeStateProperties(BitUtils.BitWriter writer, BlockState state) {
+        int blockId = getBlockId(state); // Already thread-safe
+        PropertyMeta[] metas;
+
+        rwl.readLock().lock();
+        try {
+            metas = propertyMetaCache.get(blockId);
+        } finally {
+            rwl.readLock().unlock();
+        }
+
+        if (metas == null || metas.length == 0) {
+            return; // No properties to write
+        }
+
+        for (PropertyMeta meta : metas) {
+            int index = meta.getValueIndex(state);
+            writer.write(index, meta.bits);
         }
     }
 
     /**
-     * Packs block state properties into a byte.
-     * Bits 0-2: Facing (0-5) or 7 (None)
-     * Bit 3: Half (Upper/Lower) or BedPart (Head/Foot)
-     * Bit 4: Open (Boolean) or Hinge (Left/Right)
-     * Bit 5: Powered (Boolean) or Occupied (Boolean)
-     * Bit 6-7: Chest Type (Single/Left/Right)
+     * Reads property values from BitReader and reconstructs the BlockState.
+     *
+     * @param reader  BitReader to read from
+     * @param blockId The block ID (already read)
+     * @return Reconstructed BlockState with all properties set
+     * @throws IOException If the block ID is unknown (desync prevention)
      */
-    public byte getPackedStateData(BlockState state) {
-        byte data = 0;
+    public BlockState readStateProperties(BitUtils.BitReader reader, int blockId) throws IOException {
+        Block block;
+        PropertyMeta[] metas;
 
-        // 1. Connection Properties (Fences, Panes, Vines, Walls)
-        // These blocks typically don't have FACING, so we use the lower bits
-        // differently.
-        boolean hasConnections = false;
-        if (state.contains(Properties.NORTH) && state.contains(Properties.WEST)) {
-            // Check for multiple connection props to avoid false positives (e.g. obscure
-            // blocks)
-            // But actually, just checking one is usually safe if we prioritize it for known
-            // types.
-            // Let's stick to checking existence of NORTH as the primary indicator for
-            // Fences/Walls/Panes.
-            hasConnections = true;
-        } else if (state.contains(Properties.NORTH) || state.contains(Properties.SOUTH)
-                || state.contains(Properties.EAST) || state.contains(Properties.WEST)) {
-            // Fallback for blocks that might have subsets (e.g. Vines?)
-            hasConnections = true;
+        rwl.readLock().lock();
+        try {
+            block = idToBlock.get(blockId);
+            metas = propertyMetaCache.get(blockId);
+        } finally {
+            rwl.readLock().unlock();
         }
 
-        if (hasConnections) {
-            if (state.contains(Properties.NORTH) && state.get(Properties.NORTH))
-                data |= 1;
-            if (state.contains(Properties.SOUTH) && state.get(Properties.SOUTH))
-                data |= (1 << 1);
-            if (state.contains(Properties.EAST) && state.get(Properties.EAST))
-                data |= (1 << 2);
-            if (state.contains(Properties.WEST) && state.get(Properties.WEST))
-                data |= (1 << 3);
-
-            // Connectables (Fence, Wall, Pane) typically use WATERLOGGED.
-            if (state.contains(Properties.WATERLOGGED) && state.get(Properties.WATERLOGGED))
-                data |= (1 << 4);
-
-            // Walls have "UP" property
-            if (state.contains(Properties.UP) && state.get(Properties.UP))
-                data |= (1 << 5);
-
-            return data; // Early exit for connectables
+        if (block == null) {
+            throw new IOException("CRITICAL: Unknown Block ID " + blockId + " in CisDecoder! Stream desync imminent.");
         }
-
-        // Standard Facing (Bits 0-2)
-        int directionId = 7;
-        if (state.contains(Properties.HORIZONTAL_FACING)) {
-            directionId = state.get(Properties.HORIZONTAL_FACING).getId();
-        } else if (state.contains(Properties.FACING)) {
-            directionId = state.get(Properties.FACING).getId();
-        } else {
-            // Fallback search
-            for (Map.Entry<Property<?>, Comparable<?>> entry : state.getEntries().entrySet()) {
-                if (entry.getValue() instanceof Direction dir) {
-                    directionId = dir.getId();
-                    break;
-                }
-            }
-        }
-        data |= (directionId & 7);
-
-        // 2. Common Properties (Packed into bits 3-7)
-
-        /*
-         * Packing Layouts (Fits in 1 Byte):
-         * 
-         * A) Connectables (Fences, Walls, Panes, Vines):
-         * Bits 0-3: N/S/E/W Connections
-         * Bit 4: Waterlogged
-         * Bit 5: Up (Walls center post)
-         * Bits 6-7: Unused / Available
-         * 
-         * B) Chests:
-         * Bits 0-2: Facing (N/S/E/W)
-         * Bit 3: Waterlogged (Hijacked 'Half' slot)
-         * Bits 4-5: Chest Type (0=Single, 1=Left, 2=Right)
-         * Bits 6-7: Unused / Available
-         * 
-         * C) Complex Blocks (Trapdoors, Stairs, Doors, etc):
-         * Bits 0-2: Facing (4 directions) or Axis
-         * Bit 3: Half (Top/Bottom) -> Combines with Facing for 8 positions
-         * Bit 4: Open / Hinge
-         * Bit 5: Powered / Occupied
-         * Bit 6: Waterlogged (If supported)
-         * Bit 7: Unused / Available
-         *
-         * D) Simple Blocks (Dirt, Stone):
-         * Data = 0 (No intrinsic state packed)
-         *
-         * E) Block Entities (Chests, Furnaces, etc):
-         * Inventory/Config data is stored in the separate NBT stream.
-         * The packed byte only stores visual state (like Facing).
-         */
-
-        // Bit 3: Half/Part - OR Waterlogged for Chests
-        boolean isChest = state.contains(Properties.CHEST_TYPE);
-
-        if (isChest) {
-            // Chests use Bis 4-5 for Type, Bit 0-2 for Facing.
-            // Bit 3 for Waterlogged.
-            if (state.contains(Properties.WATERLOGGED) && state.get(Properties.WATERLOGGED))
-                data |= (1 << 3);
-        } else {
-            // Normal blocks handle Half/Part in Bit 3
-            if (state.contains(Properties.DOUBLE_BLOCK_HALF)) {
-                if (state.get(Properties.DOUBLE_BLOCK_HALF) == net.minecraft.block.enums.DoubleBlockHalf.UPPER)
-                    data |= (1 << 3);
-            } else if (state.contains(Properties.BED_PART)) {
-                if (state.get(Properties.BED_PART) == net.minecraft.block.enums.BedPart.HEAD)
-                    data |= (1 << 3);
-            } else if (state.contains(Properties.BLOCK_HALF)) {
-                if (state.get(Properties.BLOCK_HALF) == net.minecraft.block.enums.BlockHalf.TOP)
-                    data |= (1 << 3);
-            }
-        }
-
-        // Bit 4: Open/Hinge
-        if (state.contains(Properties.OPEN)) {
-            if (state.get(Properties.OPEN))
-                data |= (1 << 4);
-        } else if (state.contains(Properties.DOOR_HINGE)) {
-            if (state.get(Properties.DOOR_HINGE) == net.minecraft.block.enums.DoorHinge.RIGHT)
-                data |= (1 << 4);
-        }
-
-        // Bit 5: Powered / Occupied
-        if (state.contains(Properties.POWERED)) {
-            if (state.get(Properties.POWERED))
-                data |= (1 << 5);
-        } else if (state.contains(Properties.OCCUPIED)) {
-            if (state.get(Properties.OCCUPIED))
-                data |= (1 << 5);
-        }
-
-        // Bit 4-5: Chest Type (Dynamic reuse of bits)
-        if (isChest) {
-            int typeId = state.get(Properties.CHEST_TYPE).ordinal(); // Single=0, Left=1, Right=2
-            data |= ((typeId & 3) << 4);
-        } else {
-            // Bit 6: Waterlogged (Non-Chest)
-            if (state.contains(Properties.WATERLOGGED) && state.get(Properties.WATERLOGGED))
-                data |= (1 << 6);
-        }
-
-        return data;
-    }
-
-    public BlockState getBlockState(int id, byte data) {
-        Block block = idToBlock.get(id);
-        if (block == null)
-            return Blocks.AIR.getDefaultState();
 
         BlockState state = block.getDefaultState();
 
-        // Detect if this is a Connectable block type based on properties
-        boolean isConnectable = state.contains(Properties.NORTH) || state.contains(Properties.SOUTH)
-                || state.contains(Properties.EAST) || state.contains(Properties.WEST);
-
-        if (isConnectable) {
-            // Unpack Connections (Bits 0-3)
-            try {
-                if (state.contains(Properties.NORTH))
-                    state = state.with(Properties.NORTH, (data & 1) == 1);
-                if (state.contains(Properties.SOUTH))
-                    state = state.with(Properties.SOUTH, ((data >> 1) & 1) == 1);
-                if (state.contains(Properties.EAST))
-                    state = state.with(Properties.EAST, ((data >> 2) & 1) == 1);
-                if (state.contains(Properties.WEST))
-                    state = state.with(Properties.WEST, ((data >> 3) & 1) == 1);
-
-                // Bit 4: Waterlogged (Connectables)
-                if (((data >> 4) & 1) == 1 && state.contains(Properties.WATERLOGGED))
-                    state = state.with(Properties.WATERLOGGED, true);
-
-                // Bit 5: Up (Walls)
-                if (((data >> 5) & 1) == 1 && state.contains(Properties.UP))
-                    state = state.with(Properties.UP, true);
-            } catch (Exception e) {
-            }
-
+        if (metas == null || metas.length == 0) {
             return state;
         }
 
-        // Standard Block Unpacking
-
-        // 1. Unpack Facing (Bits 0-2)
-        int facingId = data & 7;
-        if (facingId >= 0 && facingId < 6) {
-            Direction dir = Direction.byId(facingId);
-            Property<Direction> prop = directionPropertyCache.get(id);
-            if (prop != null && prop.getValues().contains(dir)) {
-                state = state.with(prop, dir);
-            }
-        }
-
-        boolean isChest = state.contains(Properties.CHEST_TYPE);
-
-        // 2. Unpack Extra Properties
-        try {
-            // Bit 3: Half/Part OR Waterlogged(Chest)
-            if (((data >> 3) & 1) == 1) {
-                if (isChest) {
-                    if (state.contains(Properties.WATERLOGGED))
-                        state = state.with(Properties.WATERLOGGED, true);
-                } else {
-                    if (state.contains(Properties.DOUBLE_BLOCK_HALF))
-                        state = state.with(Properties.DOUBLE_BLOCK_HALF,
-                                net.minecraft.block.enums.DoubleBlockHalf.UPPER);
-                    else if (state.contains(Properties.BED_PART))
-                        state = state.with(Properties.BED_PART, net.minecraft.block.enums.BedPart.HEAD);
-                    else if (state.contains(Properties.BLOCK_HALF))
-                        state = state.with(Properties.BLOCK_HALF, net.minecraft.block.enums.BlockHalf.TOP);
-                }
-            }
-
-            // Bit 4: Open/Hinge
-            if (((data >> 4) & 1) == 1 && !isChest) {
-                if (state.contains(Properties.OPEN))
-                    state = state.with(Properties.OPEN, true);
-                else if (state.contains(Properties.DOOR_HINGE))
-                    state = state.with(Properties.DOOR_HINGE, net.minecraft.block.enums.DoorHinge.RIGHT);
-            }
-
-            // Bit 5: Powered/Occupied
-            if (((data >> 5) & 1) == 1 && !isChest) {
-                if (state.contains(Properties.POWERED))
-                    state = state.with(Properties.POWERED, true);
-                else if (state.contains(Properties.OCCUPIED))
-                    state = state.with(Properties.OCCUPIED, true);
-            }
-
-            // Bit 4-5: Chest Type
-            if (isChest) {
-                int typeId = (data >> 4) & 3;
-                net.minecraft.block.enums.ChestType type = net.minecraft.block.enums.ChestType.values()[typeId % 3];
-                state = state.with(Properties.CHEST_TYPE, type);
-            } else {
-                // Bit 6: Waterlogged (Non-Chest)
-                if (((data >> 6) & 1) == 1 && state.contains(Properties.WATERLOGGED)) {
-                    state = state.with(Properties.WATERLOGGED, true);
-                }
-            }
-
-        } catch (Exception e) {
-            // Ignore invalid property values
+        for (PropertyMeta meta : metas) {
+            int index = (int) reader.read(meta.bits);
+            state = meta.applyValue(state, index);
         }
 
         return state;
+    }
+
+    /**
+     * Gets the total number of bits required to store all properties for a block.
+     */
+    public int getPropertyBitCount(int blockId) {
+        PropertyMeta[] metas;
+        rwl.readLock().lock();
+        try {
+            metas = propertyMetaCache.get(blockId);
+        } finally {
+            rwl.readLock().unlock();
+        }
+
+        if (metas == null || metas.length == 0) {
+            return 0;
+        }
+        int total = 0;
+        for (PropertyMeta meta : metas) {
+            total += meta.bits;
+        }
+        return total;
+    }
+
+    /**
+     * Gets just the Block for a given ID (without state reconstruction).
+     */
+    public Block getBlock(int id) {
+        rwl.readLock().lock();
+        try {
+            return idToBlock.get(id);
+        } finally {
+            rwl.readLock().unlock();
+        }
+    }
+
+    // ==================== Property Metadata Cache ====================
+
+    /**
+     * Stores metadata for a single block property to enable fast bit-packing.
+     */
+    @SuppressWarnings("rawtypes")
+    private static class PropertyMeta {
+        final Property property;
+        final Object[] values; // Ordered array of possible values
+        final int bits; // Bits needed to represent all values
+
+        @SuppressWarnings("unchecked")
+        PropertyMeta(Property<?> prop) {
+            this.property = prop;
+            Collection<?> valueCollection = prop.getValues();
+
+            // SORT VALUES TO ENSURE DETERMINISTIC ORDER
+            // Most properties in MC use Comparable values
+            List<Object> sortedValues = new ArrayList<>(valueCollection);
+            try {
+                sortedValues.sort((o1, o2) -> {
+                    if (o1 instanceof Comparable && o2 instanceof Comparable) {
+                        return ((Comparable) o1).compareTo(o2);
+                    }
+                    return o1.toString().compareTo(o2.toString()); // Fallback
+                });
+            } catch (Exception e) {
+                // Ignore sort errors, fallback to default order (hope it's stable)
+            }
+
+            this.values = sortedValues.toArray();
+            this.bits = Math.max(1, 32 - Integer.numberOfLeadingZeros(values.length - 1));
+        }
+
+        /**
+         * Gets the index of a state's value for this property.
+         */
+        @SuppressWarnings("unchecked")
+        int getValueIndex(BlockState state) {
+            Object value = state.get(property);
+            for (int i = 0; i < values.length; i++) {
+                if (values[i].equals(value)) {
+                    return i;
+                }
+            }
+            return 0; // Fallback to first value
+        }
+
+        /**
+         * Applies a value by index to a BlockState.
+         */
+        @SuppressWarnings("unchecked")
+        BlockState applyValue(BlockState state, int index) {
+            if (index < 0 || index >= values.length) {
+                return state; // Invalid index, keep default
+            }
+            try {
+                return state.with(property, (Comparable) values[index]);
+            } catch (Exception e) {
+                return state; // Safety fallback
+            }
+        }
     }
 }

@@ -11,11 +11,5 @@ public class ChunkisMod implements ModInitializer {
     @Override
     public void onInitialize() {
         LOGGER.info("Hello Fabric world from Chunkis!");
-
-        // Register Commands
-        net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback.EVENT
-                .register((dispatcher, registryAccess, environment) -> {
-                    io.liparakis.chunkis.command.ChunkisCommand.register(dispatcher);
-                });
     }
 }

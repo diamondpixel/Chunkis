@@ -106,8 +106,11 @@ public class ChunkMixin implements ChunkisDeltaDuck {
         List<BlockInstruction> instructions = protoDelta.getBlockInstructions();
 
         int instructionCount = instructions.size();
+
         if (instructionCount == 0)
             return;
+
+        boolean wasOptimized = false;
 
         // Apply instructions
         for (int i = 0; i < instructionCount; i++) {
@@ -119,25 +122,45 @@ public class ChunkMixin implements ChunkisDeltaDuck {
 
             BlockPos pos = chunk.getPos().getBlockPos(ins.x(), ins.y(), ins.z());
 
+            // OPTIMIZATION: Check against vanilla/generated state
+            // If the instruction sets the block to what it already is (naturally),
+            // then this instruction is redundant (e.g. Set Air on Air).
+            // We skip applying it AND skipping adding it to the new delta.
+            if (chunk.getBlockState(pos).equals(state) || (state.isAir() && chunk.getBlockState(pos).isAir())) {
+                // If the instruction is redundant, we skip it.
+                // This means the new delta will differ from the stored one (it will be
+                // smaller/empty).
+                // We must mark the delta as dirty to ensure this "cleanup" is saved to disk.
+                wasOptimized = true;
+                continue;
+            }
+
             try {
-                // Set block state using chunk's high-level method to ensure BE metadata and
-                // lighting
-                // updates
-                chunk.setBlockState(pos, state, false);
+                // Direct Section Access to bypass WorldChunk.setBlockState overhead
+                // (Lighting/Physics deadlocks)
+                // We manually calculate section index and local coordinates
+                net.minecraft.world.chunk.ChunkSection section = chunk.getSection(chunk.getSectionIndex(ins.y()));
+                section.setBlockState(ins.x(), ins.y() & 15, ins.z(), state);
 
                 if (state.getBlock().toString().contains("chest")) {
                     io.liparakis.chunkis.ChunkisMod.LOGGER.info("Chunkis Debug: Restored {} at {}", state.getBlock(),
                             pos);
                 }
 
-                // Copy to target delta
-                chunkis$delta.addBlockChange(ins.x(), ins.y(), ins.z(), state);
+                // Copy to target delta (SILENT during restoration)
+                // We typically don't mark dirty during restore to avoid redundant saves,
+                // BUT if we optimized something elsewhere, the whole delta needs saving.
+                chunkis$delta.addBlockChange(ins.x(), ins.y(), ins.z(), state, false);
 
             } catch (Throwable t) {
                 io.liparakis.chunkis.ChunkisMod.LOGGER.error(
                         "Failed to restore block at {} in chunk {}",
                         pos, chunk.getPos(), t);
             }
+        }
+
+        if (wasOptimized) {
+            chunkis$delta.markDirty();
         }
 
         // Separate pass: Restore Block Entities independently (Inventory, etc.)
@@ -170,8 +193,8 @@ public class ChunkMixin implements ChunkisDeltaDuck {
                                         worldPos);
                             }
 
-                            // Copy to target delta so it persists on next save
-                            chunkis$delta.addBlockEntityData(x, y, z, nbt);
+                            // Copy to target delta so it persists on next save (SILENT)
+                            chunkis$delta.addBlockEntityData(x, y, z, nbt, false);
                         }
                     } else if (currentState.getBlock().toString().contains("chest")) {
                         io.liparakis.chunkis.ChunkisMod.LOGGER
@@ -181,6 +204,38 @@ public class ChunkMixin implements ChunkisDeltaDuck {
             } catch (Throwable t) {
                 io.liparakis.chunkis.ChunkisMod.LOGGER.error("Failed to restore block entities in chunk {}",
                         chunk.getPos(), t);
+            }
+        }
+        // Restore Global Entities (Mobs, Items, etc.)
+        List<NbtCompound> globalEntities = protoDelta.getEntitiesList();
+        if (globalEntities != null && !globalEntities.isEmpty()) {
+            io.liparakis.chunkis.ChunkisMod.LOGGER.info("Chunkis Debug: Restoring {} global entities for chunk {}",
+                    globalEntities.size(), chunk.getPos());
+            for (NbtCompound nbt : globalEntities) {
+                try {
+                    net.minecraft.entity.EntityType.loadEntityWithPassengers(nbt, world, (entity) -> {
+                        // Paranoia check: Don't spawn if UUID already exists (prevents dupes on
+                        // re-load)
+                        if (world.getEntity(entity.getUuid()) == null) {
+                            world.spawnEntity(entity);
+                            io.liparakis.chunkis.ChunkisMod.LOGGER.info("Chunkis Debug: Restored entity {} ({}) at {}",
+                                    entity.getType(), entity.getUuid(), entity.getPos());
+                        } else {
+                            io.liparakis.chunkis.ChunkisMod.LOGGER.info(
+                                    "Chunkis Debug: Skipping duplicate entity {} ({})", entity.getType(),
+                                    entity.getUuid());
+                        }
+                        return entity;
+                    });
+
+                    // Copy back to target delta so it persists (SILENT during restoration)
+                    // We re-add it even if it was a duplicate, because the current chunk delta
+                    // needs to know about it
+                    chunkis$delta.getEntitiesList().add(nbt);
+                } catch (Exception e) {
+                    io.liparakis.chunkis.ChunkisMod.LOGGER.error("Failed to restore entity in chunk {}", chunk.getPos(),
+                            e);
+                }
             }
         }
     }

@@ -2,15 +2,17 @@ package io.liparakis.chunkis.mixin;
 
 import io.liparakis.chunkis.core.ChunkDelta;
 import io.liparakis.chunkis.core.ChunkisDeltaDuck;
+import io.liparakis.chunkis.utils.ChunkBlockEntityCapture;
+import io.liparakis.chunkis.utils.ChunkEntityCapture;
 import io.liparakis.chunkis.storage.CisStorage;
 import net.minecraft.SharedConstants;
-import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.server.world.ChunkHolder;
 import net.minecraft.server.world.ServerChunkLoadingManager;
+import net.minecraft.server.world.OptionalChunk;
 import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
+import net.minecraft.world.chunk.Chunk;
 import net.minecraft.world.chunk.WorldChunk;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
@@ -24,15 +26,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
+/**
+ * Mixin to intercept chunk loading/saving and delegate to CIS storage system.
+ * <p>
+ * Thread Safety: All methods execute on the server thread context.
+ * Performance: Minimizes allocations and uses lazy initialization.
+ */
 @Mixin(ServerChunkLoadingManager.class)
 public abstract class ThreadedAnvilChunkStorageMixin {
-
-    @Inject(method = "close", at = @At("HEAD"))
-    private void chunkis$onClose(CallbackInfo ci) {
-        if (cisStorage != null) {
-            cisStorage.close();
-        }
-    }
 
     @Shadow
     @Final
@@ -45,21 +46,128 @@ public abstract class ThreadedAnvilChunkStorageMixin {
     private CisStorage cisStorage;
 
     @Unique
-    private final ThreadLocal<BlockPos.Mutable> blockPosCache = ThreadLocal.withInitial(BlockPos.Mutable::new);
+    private ChunkEntityCapture entityCapture;
 
+    @Unique
+    private ChunkBlockEntityCapture blockEntityCapture;
+
+    /**
+     * Ensures storage is closed when chunk manager shuts down.
+     */
+    @Inject(method = "close", at = @At("HEAD"))
+    private void chunkis$onClose(CallbackInfo ci) {
+        if (cisStorage != null) {
+            cisStorage.close();
+            cisStorage = null;
+        }
+    }
+
+    /**
+     * Intercepts chunk NBT loading to provide CIS-stored chunks.
+     * Only creates NBT wrapper if delta exists, avoiding unnecessary allocations.
+     */
     @Inject(method = "getUpdatedChunkNbt(Lnet/minecraft/util/math/ChunkPos;)Ljava/util/concurrent/CompletableFuture;", at = @At("HEAD"), cancellable = true)
     private void chunkis$onGetUpdatedChunkNbt(
             ChunkPos pos,
             CallbackInfoReturnable<CompletableFuture<Optional<NbtCompound>>> cir) {
 
+        ChunkDelta delta = chunkis$getOrCreateStorage().load(pos);
+        if (delta == null) {
+            return; // Let vanilla handle this chunk
+        }
+
+        NbtCompound nbt = chunkis$createChunkNbt(pos, delta);
+        cir.setReturnValue(CompletableFuture.completedFuture(Optional.of(nbt)));
+    }
+
+    /**
+     * Intercepts chunk saving to use CIS storage instead of vanilla format.
+     * Captures block entities and entities, then saves if dirty.
+     */
+    @Inject(method = "save(Lnet/minecraft/server/world/ChunkHolder;)Z", at = @At("HEAD"), cancellable = true)
+    private void chunkis$onSave(ChunkHolder chunkHolder, CallbackInfoReturnable<Boolean> cir) {
+        // Attempt to get chunk from saving future (standard way to get ProtoChunk or
+        // WorldChunk during save)
+        var future = chunkHolder.getSavingFuture();
+
+        @SuppressWarnings("unchecked")
+        OptionalChunk<Chunk> optionalChunk = (OptionalChunk<Chunk>) future.getNow(null);
+
+        Chunk chunk = (optionalChunk != null) ? optionalChunk.orElse(null) : null;
+
+        if (chunk == null) {
+            // Fallback to WorldChunk if future is not ready/available (mostly for fully
+            // loaded chunks)
+            chunk = chunkHolder.getWorldChunk();
+        }
+
+        if (!(chunk instanceof ChunkisDeltaDuck duck)) {
+            return; // Not our chunk, let vanilla handle it
+        }
+
+        ChunkDelta delta = duck.chunkis$getDelta();
+
+        // Only attempt capture on WorldChunks where entities/block entities are active
+        if (chunk instanceof WorldChunk worldChunk && delta != null) {
+            chunkis$getOrCreateBlockEntityCapture().captureAll(worldChunk, delta);
+            chunkis$getOrCreateEntityCapture().captureAll(worldChunk, delta, world);
+        }
+
+        // Save only if delta exists and is dirty
+        if (delta != null && delta.isDirty()) {
+            ChunkPos pos = chunk.getPos();
+            chunkis$getOrCreateStorage().save(pos, delta);
+
+            if (io.liparakis.chunkis.ChunkisMod.LOGGER.isDebugEnabled()) {
+                io.liparakis.chunkis.ChunkisMod.LOGGER.debug("Saved CIS chunk {}", pos);
+            }
+        }
+
+        cir.setReturnValue(true); // Suppress vanilla save
+    }
+
+    // ===== Helper Methods =====
+
+    /**
+     * Lazy initialization of CisStorage.
+     * Thread-safe as all access is on server thread.
+     */
+    @Unique
+    private CisStorage chunkis$getOrCreateStorage() {
         if (cisStorage == null) {
             cisStorage = new CisStorage(world);
         }
+        return cisStorage;
+    }
 
-        ChunkDelta delta = cisStorage.load(pos);
-        if (delta == null)
-            return;
+    /**
+     * Lazy initialization of entity capture helper.
+     */
+    @Unique
+    private ChunkEntityCapture chunkis$getOrCreateEntityCapture() {
+        if (entityCapture == null) {
+            entityCapture = new ChunkEntityCapture();
+        }
+        return entityCapture;
+    }
 
+    /**
+     * Lazy initialization of block entity capture helper.
+     */
+    @Unique
+    private ChunkBlockEntityCapture chunkis$getOrCreateBlockEntityCapture() {
+        if (blockEntityCapture == null) {
+            blockEntityCapture = new ChunkBlockEntityCapture();
+        }
+        return blockEntityCapture;
+    }
+
+    /**
+     * Creates minimal NBT structure for CIS chunk loading.
+     * Reuses static version constant to avoid repeated lookups.
+     */
+    @Unique
+    private NbtCompound chunkis$createChunkNbt(ChunkPos pos, ChunkDelta delta) {
         NbtCompound nbt = new NbtCompound();
         nbt.putInt("DataVersion", GAME_DATA_VERSION);
         nbt.putString("Status", "minecraft:empty");
@@ -70,60 +178,6 @@ public abstract class ThreadedAnvilChunkStorageMixin {
         delta.writeNbt(chunkisData);
         nbt.put("ChunkisData", chunkisData);
 
-        cir.setReturnValue(CompletableFuture.completedFuture(Optional.of(nbt)));
-    }
-
-    @Inject(method = "save(Lnet/minecraft/server/world/ChunkHolder;)Z", at = @At("HEAD"), cancellable = true)
-    private void chunkis$onSave(ChunkHolder chunkHolder, CallbackInfoReturnable<Boolean> cir) {
-        // Direct access to the current chunk - bypassing the future chain for our own
-        // RAM state
-        WorldChunk worldChunk = chunkHolder.getWorldChunk();
-
-        if (!(worldChunk instanceof ChunkisDeltaDuck duck)) {
-            // Not a WorldChunk or not our duck - don't suppress Minecraft save if we don't
-            // handle it
-            return;
-        }
-
-        ChunkDelta delta = duck.chunkis$getDelta();
-
-        // Always capture BlockEntity data (furnaces, etc.)
-        chunkis$captureBlockEntities(worldChunk, delta);
-
-        if (delta.isDirty()) {
-            if (cisStorage == null) {
-                cisStorage = new CisStorage(world);
-            }
-            ChunkPos pos = worldChunk.getPos();
-            cisStorage.save(pos, delta);
-            io.liparakis.chunkis.ChunkisMod.LOGGER.info("[Chunkis] Saved CIS chunk {}", pos);
-        }
-
-        cir.setReturnValue(true); // Suppress vanilla save for chunks we handled
-    }
-
-    @Unique
-    private void chunkis$captureBlockEntities(WorldChunk chunk, ChunkDelta delta) {
-        // Iterate ALL block entities in the chunk to ensure we capture inventory
-        // changes
-        // even if the block state itself hasn't changed (e.g. putting items in a
-        // chest).
-        // This also supports capturing NBT for generated blocks that weren't placed by
-        // the player.
-        for (BlockEntity be : chunk.getBlockEntities().values()) {
-            if (be.isRemoved())
-                continue;
-
-            // Only capture valid block entities
-            NbtCompound nbt = be.createNbtWithId(chunk.getWorld().getRegistryManager());
-            BlockPos pos = be.getPos();
-
-            // Convert to local coordinates for ChunkDelta
-            int localX = pos.getX() & 15;
-            int localY = pos.getY();
-            int localZ = pos.getZ() & 15;
-
-            delta.addBlockEntityData(localX, localY, localZ, nbt);
-        }
+        return nbt;
     }
 }

@@ -24,9 +24,10 @@ public final class CisConstants {
 
     /**
      * Current CIS format version.
+     * V5: Paletted Section storage with dynamic property bit-packing.
      * Increment when making breaking changes to the serialization format.
      */
-    public static final int VERSION = 4;
+    public static final int VERSION = 5;
 
     // ==================== Section Geometry ====================
 

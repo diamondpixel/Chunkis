@@ -41,6 +41,10 @@ public final class CisStorage {
         }
         try {
             byte[] rawData = CisEncoder.encode(delta, mapping);
+
+            // Ensure mappings are flushed AFTER encoding (which might register new IDs)
+            mapping.flush();
+
             byte[] compressedData = compressionContext.get().compress(rawData);
 
             RegionFile rf = getRegionFile(pos);

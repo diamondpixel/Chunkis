@@ -47,6 +47,10 @@ public class ChunkDelta {
     }
 
     public void addBlockChange(int x, int y, int z, BlockState newState) {
+        addBlockChange(x, y, z, newState, true);
+    }
+
+    public void addBlockChange(int x, int y, int z, BlockState newState, boolean markDirty) {
         int paletteId = blockPalette.getOrAdd(newState);
         long posKey = BlockInstruction.packPos(x, y, z);
 
@@ -71,10 +75,16 @@ public class ChunkDelta {
             blockEntities.remove(posKey);
         }
 
-        isDirty = true;
+        if (markDirty) {
+            isDirty = true;
+        }
     }
 
     public void addBlockEntityData(int x, int y, int z, NbtCompound nbt) {
+        addBlockEntityData(x, y, z, nbt, true);
+    }
+
+    public void addBlockEntityData(int x, int y, int z, NbtCompound nbt, boolean markDirty) {
         if (nbt == null || nbt.isEmpty())
             return;
 
@@ -86,7 +96,9 @@ public class ChunkDelta {
         NbtCompound existing = blockEntities.get(key);
         if (!nbt.equals(existing)) {
             blockEntities.put(key, nbt);
-            markDirty();
+            if (markDirty) {
+                this.isDirty = true;
+            }
         }
     }
 
@@ -131,7 +143,40 @@ public class ChunkDelta {
     }
 
     public boolean isEmpty() {
-        return instructionCount == 0 && (blockEntities == null || blockEntities.isEmpty());
+        return instructionCount == 0 && (blockEntities == null || blockEntities.isEmpty())
+                && (entities == null || entities.isEmpty());
+    }
+
+    private List<NbtCompound> entities = new ArrayList<>();
+
+    public void setEntities(List<NbtCompound> newEntities) {
+        setEntities(newEntities, true);
+    }
+
+    public void setEntities(List<NbtCompound> newEntities, boolean markDirty) {
+        if (newEntities == null) {
+            newEntities = new ArrayList<>();
+        }
+
+        if (!markDirty) {
+            // restoration or silent update: force update baseline
+            this.entities = new ArrayList<>(newEntities);
+            return;
+        }
+
+        // Fuzzy Dirty Check REVERTED: Using strict equality to debug "vanishing" issue
+        // We will re-enable optimization once stability is confirmed.
+        if (!this.entities.equals(newEntities)) {
+            io.liparakis.chunkis.ChunkisMod.LOGGER.info(
+                    "Chunkis Debug: Delta Dirty! Entity count changed or data modified. Old: {}, New: {}",
+                    this.entities.size(), newEntities.size());
+            this.entities = new ArrayList<>(newEntities); // Defensive copy
+            this.isDirty = true;
+        }
+    }
+
+    public List<NbtCompound> getEntitiesList() {
+        return entities;
     }
 
     private void ensureCapacity() {
@@ -143,6 +188,8 @@ public class ChunkDelta {
     }
 
     // ==================== NBT Serialization ====================
+
+    private static final String ENTITIES_KEY = "GlobalEntities";
 
     public void writeNbt(NbtCompound tag) {
         // 1. Instructions
@@ -179,6 +226,15 @@ public class ChunkDelta {
                 beList.add(entryTag);
             }
             tag.put(BLOCK_ENTITIES_KEY, beList);
+        }
+
+        // 4. Global Entities (Mobs, Items)
+        if (!entities.isEmpty()) {
+            NbtList entityList = new NbtList();
+            for (NbtCompound entityNbt : entities) {
+                entityList.add(entityNbt);
+            }
+            tag.put(ENTITIES_KEY, entityList);
         }
     }
 
@@ -225,6 +281,16 @@ public class ChunkDelta {
                     blockEntities.put(BlockInstruction.packPos(x, y, z), entry.getCompound("nbt"));
                 }
             }
+        }
+
+        if (tag.contains(ENTITIES_KEY, 9)) {
+            NbtList entityList = tag.getList(ENTITIES_KEY, NBT_COMPOUND_TYPE);
+            this.entities.clear();
+            for (int i = 0; i < entityList.size(); i++) {
+                this.entities.add(entityList.getCompound(i));
+            }
+        } else {
+            this.entities.clear();
         }
     }
 

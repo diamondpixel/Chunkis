@@ -15,24 +15,20 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * High-performance decoder for the Chunkis format.
- * Refactored to eliminate stream overhead and reduce GC pressure during chunk
- * loading.
+ * V5 Decoder for Chunkis format.
+ * Decoding Paletted Sections and dynamic property packing.
  */
 public class CisDecoder {
 
-    // Reusable objects to prevent allocation per-decode or per-microcube.
-    // Assuming single-threaded usage per instance or synchronized external access.
-    // If used concurrently, these should be method-local or ThreadLocal.
-    private final BitReader bitReader = new BitReader(new byte[0]);
-    private final int[] paletteBuffer = new int[256]; // Max palette size buffer (reused)
+    // Reusable objects to prevent allocation
+    private final BitReader propertyReader = new BitReader(new byte[0]);
+    private final BitReader sectionReader = new BitReader(new byte[0]);
+    private final int[] localPaletteBuffer = new int[4096]; // Max palette size buffer (reused)
 
     public CisDecoder() {
     }
 
     public ChunkDelta decode(byte[] data, CisMapping mapping) throws IOException {
-        // Use a manual cursor instead of DataInputStream for the binary header.
-        // DataInputStream is synchronized and allocates objects.
         int offset = 0;
 
         // 1. Header Checks
@@ -48,68 +44,86 @@ public class CisDecoder {
         int version = readIntBE(data, offset);
         offset += 4;
         if (version != CisConstants.VERSION) {
-            throw new IOException("Unsupported CIS version: " + version);
+            throw new IOException("Unsupported CIS version: " + version + " (Expected " + CisConstants.VERSION + ")");
         }
 
         ChunkDelta delta = new ChunkDelta();
         Palette<BlockState> palette = delta.getBlockPalette();
 
-        // 2. Global Palette (Mapping IDs + Facing Data)
+        // 2. Global Palette
         int globalPaletteSize = readIntBE(data, offset);
         offset += 4;
 
-        // Pre-allocate list to exact size to avoid resizing
-        List<BlockState> globalPaletteList = new ArrayList<>(globalPaletteSize);
-
+        int[] blockIds = new int[globalPaletteSize];
         for (int i = 0; i < globalPaletteSize; i++) {
-            int mappingId = readShortBE(data, offset) & 0xFFFF;
+            blockIds[i] = readShortBE(data, offset) & 0xFFFF;
             offset += 2;
-            byte facingData = data[offset++];
+        }
 
-            BlockState state = mapping.getBlockState(mappingId, facingData);
+        int propLength = readIntBE(data, offset);
+        offset += 4;
 
+        // Create zero-copy view for property bits if possible, or copy
+        byte[] propData = new byte[propLength];
+        System.arraycopy(data, offset, propData, 0, propLength);
+        offset += propLength;
+
+        propertyReader.setData(propData);
+
+        // Reconstruct Global Palette
+        List<BlockState> globalPaletteList = new ArrayList<>(globalPaletteSize);
+        for (int i = 0; i < globalPaletteSize; i++) {
+            int blockId = blockIds[i];
+            BlockState state = mapping.readStateProperties(propertyReader, blockId);
             globalPaletteList.add(state);
             palette.getOrAdd(state);
         }
 
-        // 3. Instructions
-        int instLength = readIntBE(data, offset);
+        // 3. Sections
+        int sectionCount = readShortBE(data, offset) & 0xFFFF;
+        offset += 2;
+
+        int sectionDataLength = readIntBE(data, offset);
         offset += 4;
 
-        // Zero-copy: Use a sub-view logic or just pass offset/length if BitReader
-        // supports it.
-        // Current BitReader takes a byte array. For safety and API boundaries,
-        // we might create a subarray here, OR refactor BitReader to support offsets.
-        // For now, assuming the BitReader takes a raw array, let's just pass the whole
-        // array
-        // and add an offset capability to BitReader, or simple System.arraycopy for
-        // safety.
-        // Optimization: System.arraycopy is very fast intrinsic.
-        byte[] instData = new byte[instLength];
-        System.arraycopy(data, offset, instData, 0, instLength);
-        offset += instLength;
+        byte[] sectionData = new byte[sectionDataLength];
+        System.arraycopy(data, offset, sectionData, 0, sectionDataLength);
+        offset += sectionDataLength;
 
-        bitReader.setData(instData);
-        decodeInstructions(bitReader, delta, globalPaletteList);
+        sectionReader.setData(sectionData);
 
-        // 4. Block Entities
-        // Only wrap in DataInputStream for NBT reading if we actually have BEs.
-        int beCount = readIntBE(data, offset);
-        offset += 4;
+        for (int i = 0; i < sectionCount; i++) {
+            decodeSection(sectionReader, delta, globalPaletteList);
+        }
 
-        if (beCount > 0) {
-            // Create the stream starting exactly where we are
+        // 4. Block Entities & 5. Global Entities
+        if (offset < data.length) {
             try (ByteArrayInputStream bais = new ByteArrayInputStream(data, offset, data.length - offset);
                     DataInputStream dis = new DataInputStream(bais)) {
 
+                // --- Block Entities ---
+                int beCount = dis.readInt();
                 for (int i = 0; i < beCount; i++) {
                     byte x = dis.readByte();
                     int y = dis.readInt();
                     byte z = dis.readByte();
-                    // NbtIo.readCompound handles the complexity of NBT parsing
                     NbtCompound nbt = NbtIo.readCompound(dis);
                     delta.addBlockEntityData(x, y, z, nbt);
                 }
+
+                // --- Global Entities ---
+                try {
+                    int entityCount = dis.readInt();
+                    List<NbtCompound> entities = new java.util.ArrayList<>(entityCount);
+                    for (int i = 0; i < entityCount; i++) {
+                        entities.add(net.minecraft.nbt.NbtIo.readCompound(dis));
+                    }
+                    delta.setEntities(entities, false);
+                } catch (java.io.EOFException e) {
+                    // End of stream okay
+                }
+            } catch (IOException e) {
+                // Should not happen with ByteArrayInputStream
             }
         }
 
@@ -117,116 +131,66 @@ public class CisDecoder {
         return delta;
     }
 
-    private void decodeInstructions(BitReader reader, ChunkDelta delta, List<BlockState> globalPalette) {
-        // Read Section Count
-        int sectionCount = (int) reader.read(CisConstants.SECTION_COUNT_BITS);
+    private void decodeSection(BitReader reader, ChunkDelta delta, List<BlockState> globalPalette) {
+        // Section Y (ZigZag 8 bits)
+        int sectionY = reader.readZigZag(8);
 
-        for (int s = 0; s < sectionCount; s++) {
-            int sectionY = reader.readZigZag(CisConstants.SECTION_Y_BITS);
+        // Local Palette Size (8 bits)
+        int localSize = (int) reader.read(8);
 
-            // Unrolled loop for 64 Micro-Cubes (4x4x4)
-            // Flattening this removes loop overhead, though micro-cubes are data-driven
-            // anyway.
-            // Keeping nested loops for clarity as the JIT unrolls this effectively.
-            for (int my = 0; my < 4; my++) {
-                for (int mz = 0; mz < 4; mz++) {
-                    for (int mx = 0; mx < 4; mx++) {
-                        decodeMicroCube(reader, delta, sectionY, mx, my, mz, globalPalette);
+        if (localSize == 0) {
+            return; // Empty section
+        }
+
+        // Local Palette Entries
+        // globalBits calculation: ceil(log2(globalPaletteSize))
+        int globalBits = Math.max(1,
+                32 - Integer.numberOfLeadingZeros(Math.max(1, globalPalette.size() - 1)));
+
+        // Read Local mapping: LocalIndex -> GlobalIndex
+        // Reuse buffer to store global indices
+        for (int i = 0; i < localSize; i++) {
+            localPaletteBuffer[i] = (int) reader.read(globalBits);
+        }
+
+        // Bits per block: ceil(log2(localSize))
+        int bitsPerBlock = (localSize > 1) ? Math.max(1, 32 - Integer.numberOfLeadingZeros(localSize - 1)) : 0;
+
+        // Read 4096 blocks
+        // Loop order: Y, Z, X (matches Encoder)
+        for (int y = 0; y < 16; y++) {
+            for (int z = 0; z < 16; z++) {
+                for (int x = 0; x < 16; x++) {
+                    int localIndex = 0;
+                    if (bitsPerBlock > 0) {
+                        localIndex = (int) reader.read(bitsPerBlock);
+                    }
+
+                    if (localIndex < 0 || localIndex >= localSize) {
+                        // Corruption or bug
+                        localIndex = 0;
+                    }
+
+                    int globalIndex = localPaletteBuffer[localIndex];
+                    BlockState state = (globalIndex >= 0 && globalIndex < globalPalette.size())
+                            ? globalPalette.get(globalIndex)
+                            : Blocks.AIR.getDefaultState();
+
+                    // Skip air to save memory in Delta? Or usually delta needs to know about
+                    // changes.
+                    // Encoder only encodes if state != null and !isAir (mostly),
+                    // but here we are decoding the Full Section state effectively.
+                    // ChunkDelta.addBlockChange expects absolute coords.
+                    if (!state.isAir()) {
+                        int absY = (sectionY << 4) + y;
+                        delta.addBlockChange((byte) x, absY, (byte) z, state);
                     }
                 }
             }
         }
     }
 
-    private void decodeMicroCube(BitReader reader, ChunkDelta delta, int sectionY, int mx, int my, int mz,
-            List<BlockState> globalPalette) {
-        // 1. Local Palette Header
-        int paletteSize = (int) reader.read(CisConstants.PALETTE_SIZE_BITS);
-        if (paletteSize == 0)
-            return;
-
-        // 2. Read Local IDs
-        // Optimization: Reuse the class-level paletteBuffer instead of allocating `new
-        // int[]`
-        // We only need to clear or overwrite it.
-        if (paletteSize > paletteBuffer.length) {
-            // Should arguably never happen if PALETTE_SIZE_BITS constraints it,
-            // but safety check:
-            throw new RuntimeException("Palette size " + paletteSize + " exceeds buffer capacity");
-        }
-
-        int globalIdBits = CisConstants.GLOBAL_ID_BITS;
-        for (int i = 0; i < paletteSize; i++) {
-            paletteBuffer[i] = (int) reader.read(globalIdBits);
-        }
-
-        // bitsPerIndex calculation: standard ceil(log2(n))
-        int bitsPerIndex = (paletteSize > 1) ? (32 - Integer.numberOfLeadingZeros(paletteSize - 1)) : 0;
-
-        int lastLy = 0;
-        int lastLxz = 0;
-        int lastLid = 0;
-
-        int blockCount = (int) reader.read(CisConstants.BLOCK_COUNT_BITS);
-
-        for (int i = 0; i < blockCount; i++) {
-            // Read Flags
-            boolean newY = reader.readBool();
-            int dy = newY ? reader.readZigZag(CisConstants.Y_DELTA_BITS) : 0;
-
-            boolean newXZ = reader.readBool();
-            int lxz = newXZ ? (int) reader.read(8) : lastLxz;
-
-            int lid = lastLid;
-            if (paletteSize > 1) {
-                if (reader.readBool()) { // newID flag
-                    lid = (int) reader.read(bitsPerIndex);
-                }
-            }
-
-            // Calculation
-            int ly = lastLy + dy;
-
-            // Validate bounds to prevent logic errors silently corrupting data
-            if (lid < 0 || lid >= paletteSize) {
-                handleCorruption(mx, my, mz, sectionY, i, blockCount, lid, paletteSize);
-            }
-
-            int globalId = paletteBuffer[lid];
-
-            // Resolve State
-            // Unsafe get is slightly faster than check bounds if we trust input,
-            // but for safety in mods, bounds check is cheap.
-            BlockState state = (globalId >= 0 && globalId < globalPalette.size())
-                    ? globalPalette.get(globalId)
-                    : Blocks.AIR.getDefaultState();
-
-            // Coordinate unpacking
-            // lxz packs X in lower 4 bits, Z in upper 4 bits
-            int absX = lxz & 15;
-            int absY = (sectionY << 4) + ly;
-            int absZ = (lxz >>> 4) & 15;
-
-            delta.addBlockChange((byte) absX, absY, (byte) absZ, state);
-
-            // Update context
-            lastLy = ly;
-            lastLxz = lxz;
-            lastLid = lid;
-        }
-    }
-
-    // --- Helpers ---
-
-    private void handleCorruption(int mx, int my, int mz, int sectionY, int blockIndex, int count, int lid, int size) {
-        String msg = String.format(
-                "CIS Decode Error: LID %d out of bounds (size %d) at MicroCube [%d,%d,%d] SectionY=%d Block %d/%d",
-                lid, size, mx, my, mz, sectionY, blockIndex, count);
-        io.liparakis.chunkis.ChunkisMod.LOGGER.error(msg);
-        throw new ArrayIndexOutOfBoundsException(msg);
-    }
-
-    // Manual Big-Endian integer reader (avoids DataInputStream allocation)
+    // Manual Big-Endian integer reader
     private static int readIntBE(byte[] b, int off) {
         return ((b[off] & 0xFF) << 24) |
                 ((b[off + 1] & 0xFF) << 16) |

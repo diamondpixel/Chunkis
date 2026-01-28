@@ -53,3 +53,7 @@ java {
     }
     withSourcesJar()
 }
+
+tasks.named("runClient") {
+    dependsOn("clean", "build")
+}
