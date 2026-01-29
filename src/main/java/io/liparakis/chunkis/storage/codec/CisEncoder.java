@@ -1,8 +1,12 @@
-package io.liparakis.chunkis.storage;
+package io.liparakis.chunkis.storage.codec;
 
 import io.liparakis.chunkis.core.BlockInstruction;
 import io.liparakis.chunkis.core.ChunkDelta;
 import io.liparakis.chunkis.storage.BitUtils.BitWriter;
+import io.liparakis.chunkis.storage.CisChunk;
+import io.liparakis.chunkis.storage.CisConstants;
+import io.liparakis.chunkis.storage.CisMapping;
+import io.liparakis.chunkis.storage.CisSection;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.objects.Object2IntMap;

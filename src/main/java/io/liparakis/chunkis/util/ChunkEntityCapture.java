@@ -1,4 +1,4 @@
-package io.liparakis.chunkis.utils;
+package io.liparakis.chunkis.util;
 
 import io.liparakis.chunkis.ChunkisMod;
 import io.liparakis.chunkis.core.ChunkDelta;

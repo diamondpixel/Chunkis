@@ -69,7 +69,7 @@ public final class CisChunk {
             section = sections.get(sectionY);
             if (section == null) {
                 section = new CisSection();
-                sections.put(sectionY, section);
+                this.sections.put(sectionY, section);
             }
             lastSectionY = sectionY;
             lastSection = section;

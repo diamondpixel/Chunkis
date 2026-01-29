@@ -1,4 +1,4 @@
-package io.liparakis.chunkis.mixin;
+package io.liparakis.chunkis.mixin.storage;
 
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.nbt.scanner.NbtScanner;

@@ -1,7 +1,7 @@
-package io.liparakis.chunkis.mixin;
+package io.liparakis.chunkis.mixin.storage;
 
+import io.liparakis.chunkis.api.ChunkisDeltaDuck;
 import io.liparakis.chunkis.core.ChunkDelta;
-import io.liparakis.chunkis.core.ChunkisDeltaDuck;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.ChunkPos;

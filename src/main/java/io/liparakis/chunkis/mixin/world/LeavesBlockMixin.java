@@ -1,4 +1,4 @@
-package io.liparakis.chunkis.mixin;
+package io.liparakis.chunkis.mixin.world;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.LeavesBlock;

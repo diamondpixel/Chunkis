@@ -33,27 +33,27 @@ public final class CisSection {
     /**
      * The current storage mode (EMPTY, SPARSE, or DENSE).
      */
-    byte mode = MODE_EMPTY;
+    public byte mode = MODE_EMPTY;
 
     /**
      * Packed coordinate keys (sparse mode).
      */
-    short[] sparseKeys;
+    public short[] sparseKeys;
 
     /**
      * Block states associated with keys (sparse mode).
      */
-    BlockState[] sparseValues;
+    public BlockState[] sparseValues;
 
     /**
      * Number of blocks currently in sparse storage.
      */
-    int sparseSize;
+    public int sparseSize;
 
     /**
      * Flat array of block states (dense mode).
      */
-    BlockState[] denseBlocks;
+    public BlockState[] denseBlocks;
 
     /**
      * Number of non-air blocks in dense storage.

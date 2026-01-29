@@ -1,10 +1,10 @@
-package io.liparakis.chunkis.mixin;
+package io.liparakis.chunkis.mixin.storage;
 
+import io.liparakis.chunkis.api.ChunkisDeltaDuck;
 import io.liparakis.chunkis.core.ChunkDelta;
-import io.liparakis.chunkis.core.ChunkisDeltaDuck;
-import io.liparakis.chunkis.utils.ChunkBlockEntityCapture;
-import io.liparakis.chunkis.utils.ChunkEntityCapture;
 import io.liparakis.chunkis.storage.CisStorage;
+import io.liparakis.chunkis.util.ChunkBlockEntityCapture;
+import io.liparakis.chunkis.util.ChunkEntityCapture;
 import net.minecraft.SharedConstants;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.server.world.ChunkHolder;
@@ -130,6 +130,9 @@ public abstract class ThreadedAnvilChunkStorageMixin {
                 io.liparakis.chunkis.ChunkisMod.LOGGER.debug("Saved CIS chunk {}", pos);
             }
         }
+
+        // CRITICAL: Mark chunk as saved so key doesn't get re-added to dirty queue
+        chunk.setNeedsSaving(false);
 
         cir.setReturnValue(true); // Suppress vanilla save
     }

@@ -1,6 +1,8 @@
 package io.liparakis.chunkis.storage;
 
 import io.liparakis.chunkis.core.ChunkDelta;
+import io.liparakis.chunkis.storage.codec.CisDecoder;
+import io.liparakis.chunkis.storage.codec.CisEncoder;
 import it.unimi.dsi.fastutil.objects.Object2ObjectLinkedOpenHashMap;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.WorldSavePath;
@@ -145,8 +147,9 @@ public final class CisStorage {
      * Closes all cached region files and cleans up resources.
      */
     public void close() {
-        io.liparakis.chunkis.ChunkisMod.LOGGER.info("Stopping Chunkis Storage - Compacting {} active regions...",
-                regionCache.size());
+        // io.liparakis.chunkis.ChunkisMod.LOGGER.info("Stopping Chunkis Storage -
+        // Compacting {} active regions...",
+        // regionCache.size());
 
         cacheLock.writeLock().lock();
         try {
@@ -568,8 +571,9 @@ public final class CisStorage {
 
                 long finalSize = channel.size();
                 if (finalSize < initialSize) {
-                    io.liparakis.chunkis.ChunkisMod.LOGGER.info("Compacted {} ({} -> {} bytes)", path.getFileName(),
-                            initialSize, finalSize);
+                    // io.liparakis.chunkis.ChunkisMod.LOGGER.info("Compacted {} ({} -> {} bytes)",
+                    // path.getFileName(),
+                    // initialSize, finalSize);
                 }
 
             } catch (IOException e) {

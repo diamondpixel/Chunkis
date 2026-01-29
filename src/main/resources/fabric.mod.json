@@ -13,6 +13,9 @@
   "entrypoints": {
     "main": [
       "io.liparakis.chunkis.ChunkisMod"
+    ],
+    "client": [
+      "io.liparakis.chunkis.ClientChunkisMod"
     ]
   },
   "mixins": [

@@ -371,9 +371,10 @@ public final class ChunkDelta {
             return;
         }
 
-        io.liparakis.chunkis.ChunkisMod.LOGGER.info(
-                "Chunkis Debug: Delta Dirty! Entity count changed or data modified. Old: {}, New: {}",
-                this.entities.size(), safeEntities.size());
+        // io.liparakis.chunkis.ChunkisMod.LOGGER.info(
+        // "Chunkis Debug: Delta Dirty! Entity count changed or data modified. Old: {},
+        // New: {}",
+        // this.entities.size(), safeEntities.size());
 
         this.entities = new ArrayList<>(safeEntities);
         this.isDirty = true;

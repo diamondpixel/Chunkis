@@ -10,45 +10,47 @@ Traditional Minecraft storage saves every single block in a chunk, including tho
 By only persisting "Deltas" (changes relative to the world generator), Chunkis files are often **90-95% smaller** than vanilla files while maintaining bit-perfect accuracy for player-placed blocks, inventories, and states.
 
 > [!IMPORTANT]
-> **Beta Stage**: Currently only supports Single Player / Client-side worlds. Dedicated Server support is planned. Always backup your world!
+> **Beta Stage**: Supports Single Player and Private Servers.
+> Always backup your world before installing!
 
 ---
 
 ## ✨ Key Features
 
-- **CIS Binary Format**: A custom bit-packed protocol that uses ZigZag delta encoding and variable-width bitstreams.
+- **CIS Binary Format (V7)**: Custom bit-packed protocol with ZigZag delta encoding.
+- **Sparse Storage**: V7 format enforces sparse encoding to eliminate "air bloat" completely.
 - **Context-Aware Packing**: Automatically compresses block states (Facing, Open/Closed, Powered, etc.) into single bytes.
-- **Robust Block Entity Persistence**: Captures and restores full NBT data for Chests, Furnaces, and custom containers independently of block state changes.
-- **Deadlock-Free I/O**: Multi-threaded storage engine with granular locking to ensure the game never stutters during auto-saves.
-- **Zero-Waste Storage**: Automatic sparse-to-dense conversion. Small changes stay as lean instructions; massive changes migrate to optimized arrays.
+- **Robust Entity Persistence**: accurately captures and restores NBT data for Chests, Furnaces, and Entities.
+- **Deadlock-Free I/O**: Multi-threaded storage engine with granular locking prevents server stalls during auto-saves.
+- **Clean Console**: Optimized logging ensures the server console remains spam-free during operation.
 
 ---
 
 ## 🏗️ How it Works
 
 ### 1. Interception (Mixins)
-Chunkis hooks into the Minecraft saving pipeline (`ThreadedAnvilChunkStorage`) and chunk construction (`WorldChunk`). 
+Chunkis hooks into the Minecraft saving pipeline (`ThreadedAnvilChunkStorage`) and chunk construction (`WorldChunk`):
 - When a block is placed, a `ChunkDelta` records the change.
 - When a chunk saves, Chunkis serializes this Delta to a `.cis` file.
 - When a chunk loads, Chunkis reconstructs the player's changes on top of the base world.
 
-### 2. The CIS4 Data Format
+### 2. The CIS7 Data Format
 A `.cis` file is structured into four main layers:
 
 | Layer | Description |
 | :--- | :--- |
-| **Header** | Magic `CIS` signature and versioning. |
-| **Global Palette** | A list of unique `BlockStates` used in the chunk, including their packed metadata (facing, properties). |
-| **Instruction Stream** | A bit-packed sequence of instructions. It uses "jumps" and "deltas" to define where blocks are placed without storing every coordinate. |
-| **Block Entities** | Accurate NBT snapshots of all container blocks and tile entities. |
+| **Header** | Magic `CIS` signature and versioning (V7). |
+| **Global Palette** | A list of unique `BlockStates` used in the chunk. |
+| **Instruction Stream** | A bit-packed sequence of instructions. Uses "jumps" to skip unchanged blocks. |
+| **Entity Data** | Accurate NBT snapshots of block entities (Chests) and global entities (Mobs/Items). |
 
 ### 3. State Packing Logic
 To save bits, Chunkis "packs" Minecraft properties into a single byte:
 - **Bits 0-2**: Directional Facing (North, South, etc.)
-- **Bit 3**: Double-block half (Upper/Lower) or Bed part (Head/Foot).
-- **Bit 4**: Open/Closed state or Door Hinge side.
+- **Bit 3**: Double-block half / Bed part.
+- **Bit 4**: Open/Closed state / Hinges.
 - **Bit 5**: Powered/Occupied status.
-- **Bits 6-7**: Chest Type (Single, Left, Right).
+- **Bits 6-7**: Chest Type / instrument / specialized data.
 
 ---
 
@@ -71,5 +73,3 @@ Chunkis is built using the **Fabric** modding toolchain.
 1. Clone the repository.
 2. Run `./gradlew build`.
 3. The mod jar will be in `build/libs/`.
-
-

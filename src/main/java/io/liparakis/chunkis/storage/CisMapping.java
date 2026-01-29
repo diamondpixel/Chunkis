@@ -93,7 +93,8 @@ public final class CisMapping {
 
         ensureAirMapped();
 
-        io.liparakis.chunkis.ChunkisMod.LOGGER.info("Chunkis: Loaded {} block mappings", blockToId.size());
+        // io.liparakis.chunkis.ChunkisMod.LOGGER.info("Chunkis: Loaded {} block
+        // mappings", blockToId.size());
     }
 
     /**
@@ -132,7 +133,8 @@ public final class CisMapping {
      */
     private void ensureAirMapped() {
         if (blockToId.getInt(Blocks.AIR) == MISSING_BLOCK_ID) {
-            io.liparakis.chunkis.ChunkisMod.LOGGER.info("Chunkis: Registering AIR at ID {}", nextId);
+            // io.liparakis.chunkis.ChunkisMod.LOGGER.info("Chunkis: Registering AIR at ID
+            // {}", nextId);
             registerBlockInternal(Blocks.AIR, nextId);
             nextId++;
             flush();
@@ -192,7 +194,8 @@ public final class CisMapping {
             }
 
             id = nextId++;
-            io.liparakis.chunkis.ChunkisMod.LOGGER.info("Chunkis: Registering block {} with ID {}", block, id);
+            // io.liparakis.chunkis.ChunkisMod.LOGGER.info("Chunkis: Registering block {}
+            // with ID {}", block, id);
             registerBlockInternal(block, id);
 
             return id;
@@ -234,7 +237,8 @@ public final class CisMapping {
             try (FileWriter writer = new FileWriter(mappingFilePath.toFile())) {
                 GSON.toJson(snapshot, writer);
                 savedCount = snapshot.size();
-                io.liparakis.chunkis.ChunkisMod.LOGGER.info("Chunkis: Flushed {} mappings to disk", savedCount);
+                // io.liparakis.chunkis.ChunkisMod.LOGGER.info("Chunkis: Flushed {} mappings to
+                // disk", savedCount);
             } catch (Exception e) {
                 io.liparakis.chunkis.ChunkisMod.LOGGER.error("Chunkis: Failed to save mappings", e);
             }

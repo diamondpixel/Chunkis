@@ -1,8 +1,8 @@
-package io.liparakis.chunkis.mixin;
+package io.liparakis.chunkis.mixin.world;
 
+import io.liparakis.chunkis.api.ChunkisDeltaDuck;
 import io.liparakis.chunkis.core.BlockInstruction;
 import io.liparakis.chunkis.core.ChunkDelta;
-import io.liparakis.chunkis.core.ChunkisDeltaDuck;
 import io.liparakis.chunkis.core.Palette;
 import io.liparakis.chunkis.core.VanillaChunkSnapshot;
 import net.minecraft.block.BlockState;
@@ -373,12 +373,12 @@ public class ChunkMixin implements ChunkisDeltaDuck {
 
             section.setBlockState(ins.x(), ins.y() & 15, ins.z(), state);
 
-            if (state.getBlock().toString().contains("chest")) {
-                io.liparakis.chunkis.ChunkisMod.LOGGER.info(
-                        "Chunkis Debug: Restored {} at {}",
-                        state.getBlock(),
-                        pos);
-            }
+            //if (state.getBlock().toString().contains("chest")) {
+                // io.liparakis.chunkis.ChunkisMod.LOGGER.info(
+                // "Chunkis Debug: Restored {} at {}",
+                // state.getBlock(),
+                // pos);
+            //}
 
             return true;
 
@@ -487,12 +487,12 @@ public class ChunkMixin implements ChunkisDeltaDuck {
             chunk.removeBlockEntity(worldPos);
             chunk.addBlockEntity(be);
 
-            if (currentState.getBlock().toString().contains("chest")) {
-                io.liparakis.chunkis.ChunkisMod.LOGGER.info(
-                        "Chunkis Debug: Restored Content for {} at {}",
-                        currentState.getBlock(),
-                        worldPos);
-            }
+            // if (currentState.getBlock().toString().contains("chest")) {
+            // io.liparakis.chunkis.ChunkisMod.LOGGER.info(
+            // "Chunkis Debug: Restored Content for {} at {}",
+            // currentState.getBlock(),
+            // worldPos);
+            // }
 
             // Copy to runtime delta (silent)
             chunkis$delta.addBlockEntityData(x, y, z, nbt, false);
@@ -535,10 +535,10 @@ public class ChunkMixin implements ChunkisDeltaDuck {
             return;
         }
 
-        io.liparakis.chunkis.ChunkisMod.LOGGER.info(
-                "Chunkis Debug: Restoring {} global entities for chunk {}",
-                globalEntities.size(),
-                chunk.getPos());
+        // io.liparakis.chunkis.ChunkisMod.LOGGER.info(
+        // "Chunkis Debug: Restoring {} global entities for chunk {}",
+        // globalEntities.size(),
+        // chunk.getPos());
 
         for (NbtCompound nbt : globalEntities) {
             chunkis$restoreSingleEntity(world, chunk, nbt);
@@ -575,19 +575,19 @@ public class ChunkMixin implements ChunkisDeltaDuck {
             net.minecraft.entity.EntityType.loadEntityWithPassengers(nbt, world, entity -> {
                 // Skip if entity already exists (prevents duplication)
                 if (world.getEntity(entity.getUuid()) != null) {
-                    io.liparakis.chunkis.ChunkisMod.LOGGER.info(
-                            "Chunkis Debug: Skipping duplicate entity {} ({})",
-                            entity.getType(),
-                            entity.getUuid());
+                    // io.liparakis.chunkis.ChunkisMod.LOGGER.info(
+                    // "Chunkis Debug: Skipping duplicate entity {} ({})",
+                    // entity.getType(),
+                    // entity.getUuid());
                     return entity;
                 }
 
                 world.spawnEntity(entity);
-                io.liparakis.chunkis.ChunkisMod.LOGGER.info(
-                        "Chunkis Debug: Restored entity {} ({}) at {}",
-                        entity.getType(),
-                        entity.getUuid(),
-                        entity.getPos());
+                // io.liparakis.chunkis.ChunkisMod.LOGGER.info(
+                // "Chunkis Debug: Restored entity {} ({}) at {}",
+                // entity.getType(),
+                // entity.getUuid(),
+                // entity.getPos());
 
                 return entity;
             });

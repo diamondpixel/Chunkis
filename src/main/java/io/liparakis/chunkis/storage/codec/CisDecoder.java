@@ -1,9 +1,11 @@
-package io.liparakis.chunkis.storage;
+package io.liparakis.chunkis.storage.codec;
 
 import io.liparakis.chunkis.core.BlockInstruction;
 import io.liparakis.chunkis.core.ChunkDelta;
 import io.liparakis.chunkis.core.Palette;
 import io.liparakis.chunkis.storage.BitUtils.BitReader;
+import io.liparakis.chunkis.storage.CisConstants;
+import io.liparakis.chunkis.storage.CisMapping;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.nbt.NbtCompound;
