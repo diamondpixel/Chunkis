@@ -1,16 +1,12 @@
 {
   "schemaVersion": 1,
   "id": "chunkis",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Chunkis",
   "description": "Chunkis is a mod that adds chunk saving and loading to Minecraft.",
   "authors": [
     "Liparakis"
   ],
-  "contact": {
-    "homepage": "https://fabricmc.net/",
-    "sources": "https://github.com/FabricMC/fabric-example-mod"
-  },
   "license": "MIT",
   "icon": "assets/logo.png",
   "environment": "*",

@@ -10,6 +10,5 @@ public class ChunkisMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("Hello Fabric world from Chunkis!");
     }
 }

@@ -78,8 +78,7 @@ public final class ChunkEntityCapture {
                 pos.getStartZ(),
                 pos.getEndX() + 1.0,
                 world.getTopY(),
-                pos.getEndZ() + 1.0
-        );
+                pos.getEndZ() + 1.0);
 
         // Server thread query - safe as mixin executes on server thread
         return world.getEntitiesByClass(Entity.class, chunkBox, entity -> true);
@@ -94,7 +93,7 @@ public final class ChunkEntityCapture {
      * 3. Skip passengers (saved with their vehicle)
      * 4. Skip entities not physically in this chunk (prevent duplication)
      *
-     * @param entity Entity to check
+     * @param entity   Entity to check
      * @param chunkPos Position of the chunk being saved
      * @return true if entity should be captured
      */

@@ -10,65 +10,87 @@ import net.minecraft.block.BlockState;
 import java.util.Arrays;
 
 /**
- * A sparse, memory-efficient representation of a Chunk used for delta operations.
- * Refactored to use primitive collections and caching for high-performance tick operations.
+ * A sparse, memory-efficient representation of a chunk used for delta
+ * operations.
+ * Uses primitive collections and spatial locality caching for high-performance
+ * operations.
  */
-public class CisChunk {
-    private final Int2ObjectMap<CisSection> sections = new Int2ObjectOpenHashMap<>();
-
-    // --- Hot Path Cache ---
-    // Caching the last accessed section significantly speeds up sequential writes
-    // (e.g., applying a delta where blocks are sorted or grouped by chunk section).
-    private int lastSectionY = Integer.MIN_VALUE;
-    private CisSection lastSection = null;
+public final class CisChunk {
+    /**
+     * Bit-shift value for world Y to section Y conversion.
+     */
+    private static final int SECTION_SHIFT = 4;
 
     /**
-     * Adds a block to the chunk.
-     * Optimized to minimize map lookups via spatial locality caching.
+     * Bit-mask for extracting local coordinates from world coordinates.
+     */
+    private static final int COORD_MASK = 15;
+
+    /**
+     * Map of section Y-indices to their storage objects.
+     */
+    private final Int2ObjectMap<CisSection> sections;
+
+    /**
+     * The Y-index of the last accessed section (for caching).
+     */
+    private int lastSectionY;
+
+    /**
+     * The last accessed section instance (for caching).
+     */
+    private CisSection lastSection;
+
+    /**
+     * Creates a new empty CisChunk.
+     */
+    public CisChunk() {
+        this.sections = new Int2ObjectOpenHashMap<>();
+        this.lastSectionY = Integer.MIN_VALUE;
+    }
+
+    /**
+     * Adds a block to the chunk at the specified coordinates.
+     * Optimized with spatial locality caching to minimize map lookups during
+     * sequential writes.
      *
-     * @param x     Local chunk X (0-15)
-     * @param y     World Y
-     * @param z     Local chunk Z (0-15)
-     * @param state The BlockState to set
+     * @param x     the local chunk X coordinate (0-15)
+     * @param y     the world Y coordinate
+     * @param z     the local chunk Z coordinate (0-15)
+     * @param state the BlockState to set
      */
     public void addBlock(int x, int y, int z, BlockState state) {
-        int sectionY = y >> 4;
+        int sectionY = y >> SECTION_SHIFT;
 
         CisSection section;
-
-        // Fast path: Check if we are writing to the same section as the last operation.
-        // This is very common during loop-based population or delta application.
         if (sectionY == lastSectionY && lastSection != null) {
             section = lastSection;
         } else {
-            // Slow path: Map lookup or creation
             section = sections.get(sectionY);
             if (section == null) {
                 section = new CisSection();
                 sections.put(sectionY, section);
             }
-
-            // Update cache
             lastSectionY = sectionY;
             lastSection = section;
         }
 
-        // Apply coordinate masking (0-15) here ensures safety regardless of input
-        section.setBlock(x & 15, y & 15, z & 15, state);
+        section.setBlock(x & COORD_MASK, y & COORD_MASK, z & COORD_MASK, state);
     }
 
     /**
      * Reconstructs a CisChunk from a compressed delta.
+     * Performance is optimal when BlockInstructions are sorted by Y coordinate.
+     *
+     * @param delta the ChunkDelta containing block instructions and palette
+     * @return a new CisChunk populated with the delta's blocks
      */
     public static CisChunk fromDelta(ChunkDelta delta) {
         CisChunk chunk = new CisChunk();
         Palette<BlockState> palette = delta.getBlockPalette();
 
-        // Optimization note: If BlockInstructions are sorted by Y in the source,
-        // the cache in addBlock() will hit almost 100% of the time.
         for (BlockInstruction ins : delta.getBlockInstructions()) {
             BlockState state = palette.get(ins.paletteIndex());
-            // Null check handles palette holes or air skipping depending on impl
             if (state != null) {
                 chunk.addBlock(ins.x(), ins.y(), ins.z(), state);
             }
@@ -77,16 +99,20 @@ public class CisChunk {
     }
 
     /**
-     * Returns the raw primitive map of sections.
-     * Note: Unlike TreeMap, this map is NOT sorted.
+     * Returns the raw map of section Y indices to CisSection objects.
+     * Note: The returned map is not sorted by key.
+     *
+     * @return the internal sections map
      */
     public Int2ObjectMap<CisSection> getSections() {
         return sections;
     }
 
     /**
-     * Returns section indices sorted from bottom to top.
-     * Useful for serialization where order is required.
+     * Returns section Y indices sorted from bottom to top.
+     * Useful for serialization where deterministic order is required.
+     *
+     * @return a sorted array of section indices
      */
     public int[] getSortedSectionIndices() {
         int[] keys = sections.keySet().toIntArray();

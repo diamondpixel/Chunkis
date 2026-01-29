@@ -39,15 +39,26 @@ public abstract class ThreadedAnvilChunkStorageMixin {
     @Final
     ServerWorld world;
 
+    /**
+     * The game's current data version, used to ensure NBT compatibility.
+     */
     @Unique
     private static final int GAME_DATA_VERSION = SharedConstants.getGameVersion().getSaveVersion().getId();
-
+    /**
+     * The underlying storage manager for .cis files.
+     */
     @Unique
     private CisStorage cisStorage;
 
+    /**
+     * Helper for capturing and restoring entity states in chunks.
+     */
     @Unique
     private ChunkEntityCapture entityCapture;
 
+    /**
+     * Helper for capturing and restoring block entity states in chunks.
+     */
     @Unique
     private ChunkBlockEntityCapture blockEntityCapture;
 
@@ -72,9 +83,6 @@ public abstract class ThreadedAnvilChunkStorageMixin {
             CallbackInfoReturnable<CompletableFuture<Optional<NbtCompound>>> cir) {
 
         ChunkDelta delta = chunkis$getOrCreateStorage().load(pos);
-        if (delta == null) {
-            return; // Let vanilla handle this chunk
-        }
 
         NbtCompound nbt = chunkis$createChunkNbt(pos, delta);
         cir.setReturnValue(CompletableFuture.completedFuture(Optional.of(nbt)));

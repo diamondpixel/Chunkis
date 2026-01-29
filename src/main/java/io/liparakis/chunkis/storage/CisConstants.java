@@ -1,16 +1,12 @@
 package io.liparakis.chunkis.storage;
 
 /**
- * Central constants and utility methods for the CIS (Chunk Information Storage)
+ * Central constants for CIS (Chunk Information Storage)
  * system.
  * <p>
  * This class provides:
  * - File format constants (magic numbers, versions)
  * - Geometry constants (section sizes, region sizes)
- * - Coordinate packing/unpacking utilities
- * - Bit manipulation helpers
- * <p>
- * All methods are static and thread-safe. No instances should be created.
  */
 public final class CisConstants {
 
@@ -24,10 +20,10 @@ public final class CisConstants {
 
     /**
      * Current CIS format version.
-     * V5: Paletted Section storage with dynamic property bit-packing.
+     * V7: Fixed dense encoding data loss by forcing full sparse support.
      * Increment when making breaking changes to the serialization format.
      */
-    public static final int VERSION = 5;
+    public static final int VERSION = 7;
 
     // ==================== Section Geometry ====================
 
@@ -72,26 +68,26 @@ public final class CisConstants {
     public static final int MAX_CACHED_REGIONS = 64;
 
     /**
-     * Threshold for sparse-to-dense storage conversion (32 blocks).
+     * Threshold for sparse-to-dense storage conversion (4097 blocks).
      * Sections with fewer blocks use sparse storage (hash map).
-     * Sections with more blocks use dense storage (array).
+     * Disabled in V7 (threshold > max volume) to prevent dense encoding data loss.
      */
-    public static final int SPARSE_DENSE_THRESHOLD = 32;
+    public static final int SPARSE_DENSE_THRESHOLD = 4097;
 
     /**
-     * Maximum capacity for sparse storage before forcing conversion/resize (64
+     * Maximum capacity for sparse storage before forcing conversion/resize (4097
      * blocks).
      */
-    public static final int MAX_SPARSE_CAPACITY = 64;
+    public static final int MAX_SPARSE_CAPACITY = 4097;
 
     // ==================== Serialization Bit Widths ====================
 
-    public static final int GLOBAL_ID_BITS = 16;
     public static final int PALETTE_SIZE_BITS = 8;
-    public static final int SECTION_COUNT_BITS = 16;
-    public static final int SECTION_Y_BITS = 16; // ZigZag encoded
-    public static final int Y_DELTA_BITS = 6; // ZigZag encoded delta Y
-    public static final int BLOCK_COUNT_BITS = 7;
+    public static final int SECTION_Y_BITS = 6; // ZigZag encoded
+    public static final int BLOCK_COUNT_BITS = 13;
+
+    public static final int SECTION_ENCODING_SPARSE = 0;
+    public static final int SECTION_ENCODING_DENSE = 1;
 
     // ==================== Private Constructor ====================
 

@@ -1,4 +1,4 @@
-<img src="assets/logo.png" width="150" alt="Chunkis Logo" style="border-radius: 50%;">
+<img src="src/main/resources/assets/logo.png" width="150" alt="Chunkis Logo" style="border-radius: 50%;">
 
 # Chunkis
 

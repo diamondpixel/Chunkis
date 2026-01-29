@@ -14,243 +14,298 @@ import net.minecraft.state.property.Property;
 import net.minecraft.util.Identifier;
 
 import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
- * Optimized mapping system for block translation.
- * V5: Uses lossless property-based serialization instead of fixed 8-bit
- * packing.
- * Ensures deterministic bitstream generation.
+ * Optimized mapping system for block translation with lossless property-based
+ * serialization.
+ * Uses identity-based comparison for maximum performance and ensures
+ * deterministic bitstream generation.
+ * Thread-safe with read-write locking for concurrent access.
  */
-public class CisMapping {
+public final class CisMapping {
     private static final Gson GSON = new Gson();
 
-    // Map Block references directly to IDs (Identity-based comparison is fastest)
+    /**
+     * Constant representing a block that is not yet mapped.
+     */
+    private static final int MISSING_BLOCK_ID = -1;
+
+    /**
+     * Map for fast lookup of block IDs from block instances.
+     */
     private final Reference2IntMap<Block> blockToId = new Reference2IntOpenHashMap<>();
+
+    /**
+     * Map for fast lookup of blocks from their persistent IDs.
+     */
     private final Int2ObjectMap<Block> idToBlock = new Int2ObjectOpenHashMap<>();
 
-    // Cache property metadata per block ID for fast encode/decode
+    /**
+     * Cache for property metadata to avoid re-calculating bit-packing information.
+     */
     private final Int2ObjectMap<PropertyMeta[]> propertyMetaCache = new Int2ObjectOpenHashMap<>();
 
+    /**
+     * Path where the JSON mapping file is stored.
+     */
     private final Path mappingFilePath;
-    private int nextId = 0;
-    private final Object lock = new Object();
-    private final java.util.concurrent.locks.ReadWriteLock rwl = new java.util.concurrent.locks.ReentrantReadWriteLock();
 
+    /**
+     * Read-write lock to ensure thread-safe operations during concurrent chunk
+     * saving.
+     */
+    private final ReadWriteLock rwLock = new ReentrantReadWriteLock();
+
+    /**
+     * Lock used specifically for flushing data to disk.
+     */
+    private final Object flushLock = new Object();
+
+    /**
+     * The next available block ID to assign.
+     */
+    private int nextId = 0;
+
+    /**
+     * The number of mappings currently saved on disk.
+     */
+    private int savedCount = 0;
+
+    /**
+     * Creates a new CisMapping and loads existing mappings from file if present.
+     *
+     * @param mappingFile the path to the mapping file
+     * @throws IOException if loading fails
+     */
     public CisMapping(Path mappingFile) throws IOException {
         this.mappingFilePath = mappingFile;
-        blockToId.defaultReturnValue(-1); // Use -1 to detect missing mappings
+        blockToId.defaultReturnValue(MISSING_BLOCK_ID);
 
         if (mappingFile.toFile().exists()) {
-            try (FileReader reader = new FileReader(mappingFile.toFile())) {
-                Map<String, Integer> map = GSON.fromJson(reader, new TypeToken<Map<String, Integer>>() {
-                }.getType());
-                if (map != null) {
-                    for (Map.Entry<String, Integer> entry : map.entrySet()) {
-                        Identifier id = Identifier.tryParse(entry.getKey());
-                        if (id != null) {
-                            Block block = Registries.BLOCK.get(id);
-                            if (block != Blocks.AIR || entry.getKey().equals("minecraft:air")) {
-                                int val = entry.getValue();
-                                blockToId.put(block, val);
-                                idToBlock.put(val, block);
-                                cachePropertyMeta(block, val);
-                                if (val >= nextId)
-                                    nextId = val + 1;
-                            }
-                        }
-                    }
+            loadMappings();
+        }
+
+        ensureAirMapped();
+
+        io.liparakis.chunkis.ChunkisMod.LOGGER.info("Chunkis: Loaded {} block mappings", blockToId.size());
+    }
+
+    /**
+     * Loads existing block mappings from the mapping file.
+     */
+    private void loadMappings() throws IOException {
+        try (FileReader reader = new FileReader(mappingFilePath.toFile())) {
+            Map<String, Integer> map = GSON.fromJson(reader, new TypeToken<Map<String, Integer>>() {
+            }.getType());
+
+            if (map == null)
+                return;
+
+            for (Map.Entry<String, Integer> entry : map.entrySet()) {
+                Identifier id = Identifier.tryParse(entry.getKey());
+                if (id == null)
+                    continue;
+
+                Block block = Registries.BLOCK.get(id);
+                if (block == Blocks.AIR && !entry.getKey().equals("minecraft:air")) {
+                    continue;
+                }
+
+                int blockId = entry.getValue();
+                registerBlockInternal(block, blockId);
+
+                if (blockId >= nextId) {
+                    nextId = blockId + 1;
                 }
             }
         }
+    }
 
-        io.liparakis.chunkis.ChunkisMod.LOGGER.info("Chunkis Debug: Loaded global mappings: {} entries",
-                blockToId.size());
-
-        io.liparakis.chunkis.ChunkisMod.LOGGER.info("Chunkis Debug: Loaded global mappings: {} entries",
-                blockToId.size());
-
-        // Ensure AIR is always mapped.
-        // Use nextId to avoid overwriting existing mappings (like Stone=0) which causes
-        // bitstream desync.
-        if (blockToId.getInt(Blocks.AIR) == -1) {
-            io.liparakis.chunkis.ChunkisMod.LOGGER
-                    .info("Chunkis Debug: Air missing from mappings, registering at ID {}", nextId);
-            registerBlock(Blocks.AIR, nextId);
+    /**
+     * Ensures air is always mapped to prevent desync issues.
+     */
+    private void ensureAirMapped() {
+        if (blockToId.getInt(Blocks.AIR) == MISSING_BLOCK_ID) {
+            io.liparakis.chunkis.ChunkisMod.LOGGER.info("Chunkis: Registering AIR at ID {}", nextId);
+            registerBlockInternal(Blocks.AIR, nextId);
             nextId++;
-            // Force save since we modified the map on load
             flush();
         }
     }
 
     /**
-     * Pre-calculates property metadata for a block to enable fast bit-packing.
-     * Sorts properties by name to ensure deterministic bitstream order consistently
-     * across runs/JVMs.
+     * Caches property metadata for a block to enable fast bit-packing.
+     * Properties are sorted by name for deterministic ordering.
+     *
+     * @param block the block to cache metadata for
+     * @param id    the block's ID
      */
     private void cachePropertyMeta(Block block, int id) {
         Collection<Property<?>> props = block.getStateManager().getProperties();
+
         if (props.isEmpty()) {
             propertyMetaCache.put(id, new PropertyMeta[0]);
             return;
         }
 
-        // SORT PROPERTIES BY NAME TO ENSURE DETERMINISTIC ORDER
         List<Property<?>> sortedProps = new ArrayList<>(props);
-        sortedProps.sort((p1, p2) -> p1.getName().compareTo(p2.getName()));
+        sortedProps.sort(Comparator.comparing(Property::getName));
 
-        List<PropertyMeta> metas = new ArrayList<>(sortedProps.size());
-        for (Property<?> prop : sortedProps) {
-            metas.add(new PropertyMeta(prop));
-        }
-        propertyMetaCache.put(id, metas.toArray(new PropertyMeta[0]));
+        PropertyMeta[] metas = sortedProps.stream()
+                .map(PropertyMeta::new)
+                .toArray(PropertyMeta[]::new);
+
+        propertyMetaCache.put(id, metas);
     }
 
+    /**
+     * Gets the block ID for a given block state, registering it if necessary.
+     * Thread-safe with optimistic read-lock strategy.
+     *
+     * @param state the block state
+     * @return the block ID
+     */
     public int getBlockId(BlockState state) {
         Block block = state.getBlock();
 
-        // Fast path with Read Lock
-        rwl.readLock().lock();
+        rwLock.readLock().lock();
         try {
             int id = blockToId.getInt(block);
-            if (id != -1) {
+            if (id != MISSING_BLOCK_ID) {
                 return id;
             }
         } finally {
-            rwl.readLock().unlock();
+            rwLock.readLock().unlock();
         }
 
-        // Write Lock for registration
-        rwl.writeLock().lock();
+        rwLock.writeLock().lock();
         try {
-            // Double-check under write lock
             int id = blockToId.getInt(block);
-            if (id != -1)
+            if (id != MISSING_BLOCK_ID) {
                 return id;
+            }
 
             id = nextId++;
-            io.liparakis.chunkis.ChunkisMod.LOGGER.info("Chunkis Debug: Registering new block {} with ID {}", block,
-                    id);
-            registerBlock(block, id);
-            // Removed synchronous save() to prevent WorldGen hang
+            io.liparakis.chunkis.ChunkisMod.LOGGER.info("Chunkis: Registering block {} with ID {}", block, id);
+            registerBlockInternal(block, id);
 
             return id;
         } finally {
-            rwl.writeLock().unlock();
+            rwLock.writeLock().unlock();
         }
     }
 
-    private void registerBlock(Block block, int id) {
+    /**
+     * Internal method to register a block without locking.
+     * <p>
+     * Caller MUST hold the write lock before calling this.
+     *
+     * @param block the block to register
+     * @param id    the ID to assign
+     */
+    private void registerBlockInternal(Block block, int id) {
         blockToId.put(block, id);
         idToBlock.put(id, block);
         cachePropertyMeta(block, id);
     }
 
-    private int savedCount = 0;
-
+    /**
+     * Flushes new mappings to disk if there are unsaved changes.
+     * Uses double-checked locking to minimize I/O.
+     */
     public void flush() {
-        // Fast check without lock (volatile read of size? no, size() isn't volatile
-        // usually but safe enough for "eventual")
         if (blockToId.size() <= savedCount) {
             return;
         }
 
-        Map<String, Integer> snapshot = new java.util.HashMap<>();
-        int currentSize;
+        Map<String, Integer> snapshot = createMappingSnapshot();
 
-        rwl.readLock().lock();
-        try {
-            if (blockToId.size() <= savedCount)
-                return; // Double check
-
-            // Create snapshot to minimize locking time
-            for (Int2ObjectMap.Entry<Block> entry : idToBlock.int2ObjectEntrySet()) {
-                Identifier id = Registries.BLOCK.getId(entry.getValue());
-                snapshot.put(id.toString(), entry.getIntKey());
-            }
-            currentSize = blockToId.size();
-        } finally {
-            rwl.readLock().unlock();
-        }
-
-        // Write IO outside the lock
-        synchronized (lock) {
-            if (currentSize <= savedCount)
+        synchronized (flushLock) {
+            if (snapshot.size() <= savedCount) {
                 return;
+            }
 
-            try (java.io.FileWriter writer = new java.io.FileWriter(mappingFilePath.toFile())) {
+            try (FileWriter writer = new FileWriter(mappingFilePath.toFile())) {
                 GSON.toJson(snapshot, writer);
-                savedCount = currentSize;
-                io.liparakis.chunkis.ChunkisMod.LOGGER.info("Chunkis Debug: Flushed global_ids.json ({} entries)",
-                        currentSize);
+                savedCount = snapshot.size();
+                io.liparakis.chunkis.ChunkisMod.LOGGER.info("Chunkis: Flushed {} mappings to disk", savedCount);
             } catch (Exception e) {
-                io.liparakis.chunkis.ChunkisMod.LOGGER.error("Chunkis Debug: Failed to save mappings!", e);
+                io.liparakis.chunkis.ChunkisMod.LOGGER.error("Chunkis: Failed to save mappings", e);
             }
         }
     }
 
-    // ==================== V5: Dynamic Property Bit-Packing ====================
+    /**
+     * Creates a snapshot of current mappings in a format suitable for JSON
+     * serialization.
+     *
+     * @return a map of block identifier strings to their allocated IDs
+     */
+    private Map<String, Integer> createMappingSnapshot() {
+        Map<String, Integer> snapshot = new HashMap<>();
+
+        rwLock.readLock().lock();
+        try {
+            if (blockToId.size() <= savedCount) {
+                return snapshot;
+            }
+
+            for (Int2ObjectMap.Entry<Block> entry : idToBlock.int2ObjectEntrySet()) {
+                Identifier id = Registries.BLOCK.getId(entry.getValue());
+                snapshot.put(id.toString(), entry.getIntKey());
+            }
+        } finally {
+            rwLock.readLock().unlock();
+        }
+
+        return snapshot;
+    }
 
     /**
      * Writes all property values of a BlockState to the BitWriter.
-     * Each property is written using the minimum bits required for its value range.
+     * Each property uses the minimum bits required for its value range.
      *
-     * @param writer BitWriter to write to
-     * @param state  BlockState to serialize
+     * @param writer the BitWriter to write to
+     * @param state  the BlockState to serialize
      */
     public void writeStateProperties(BitUtils.BitWriter writer, BlockState state) {
-        int blockId = getBlockId(state); // Already thread-safe
-        PropertyMeta[] metas;
+        int blockId = getBlockId(state);
+        PropertyMeta[] metas = getPropertyMetas(blockId);
 
-        rwl.readLock().lock();
-        try {
-            metas = propertyMetaCache.get(blockId);
-        } finally {
-            rwl.readLock().unlock();
-        }
-
-        if (metas == null || metas.length == 0) {
-            return; // No properties to write
+        if (metas == null) {
+            return;
         }
 
         for (PropertyMeta meta : metas) {
-            int index = meta.getValueIndex(state);
-            writer.write(index, meta.bits);
+            writer.write(meta.getValueIndex(state), meta.bits);
         }
     }
 
     /**
      * Reads property values from BitReader and reconstructs the BlockState.
      *
-     * @param reader  BitReader to read from
-     * @param blockId The block ID (already read)
-     * @return Reconstructed BlockState with all properties set
-     * @throws IOException If the block ID is unknown (desync prevention)
+     * @param reader  the BitReader to read from
+     * @param blockId the block ID
+     * @return the reconstructed BlockState
+     * @throws IOException if the block ID is unknown
      */
     public BlockState readStateProperties(BitUtils.BitReader reader, int blockId) throws IOException {
-        Block block;
-        PropertyMeta[] metas;
-
-        rwl.readLock().lock();
-        try {
-            block = idToBlock.get(blockId);
-            metas = propertyMetaCache.get(blockId);
-        } finally {
-            rwl.readLock().unlock();
-        }
+        Block block = getBlockInternal(blockId);
 
         if (block == null) {
-            throw new IOException("CRITICAL: Unknown Block ID " + blockId + " in CisDecoder! Stream desync imminent.");
+            throw new IOException("Unknown Block ID " + blockId + " - stream desync detected");
         }
 
+        PropertyMeta[] metas = getPropertyMetas(blockId);
         BlockState state = block.getDefaultState();
 
-        if (metas == null || metas.length == 0) {
+        if (metas == null) {
             return state;
         }
 
@@ -263,68 +318,77 @@ public class CisMapping {
     }
 
     /**
-     * Gets the total number of bits required to store all properties for a block.
+     * Gets property metadata for a given block ID.
+     *
+     * @param blockId the ID of the block
+     * @return an array of property metadata, or {@code null} if none exists
      */
-    public int getPropertyBitCount(int blockId) {
-        PropertyMeta[] metas;
-        rwl.readLock().lock();
+    private PropertyMeta[] getPropertyMetas(int blockId) {
+        rwLock.readLock().lock();
         try {
-            metas = propertyMetaCache.get(blockId);
+            return propertyMetaCache.get(blockId);
         } finally {
-            rwl.readLock().unlock();
+            rwLock.readLock().unlock();
         }
-
-        if (metas == null || metas.length == 0) {
-            return 0;
-        }
-        int total = 0;
-        for (PropertyMeta meta : metas) {
-            total += meta.bits;
-        }
-        return total;
     }
 
     /**
-     * Gets just the Block for a given ID (without state reconstruction).
+     * Gets the block instance for a given ID.
+     *
+     * @param id the block ID
+     * @return the block instance, or {@code null} if not mapped
      */
-    public Block getBlock(int id) {
-        rwl.readLock().lock();
+    private Block getBlockInternal(int id) {
+        rwLock.readLock().lock();
         try {
             return idToBlock.get(id);
         } finally {
-            rwl.readLock().unlock();
+            rwLock.readLock().unlock();
         }
     }
 
-    // ==================== Property Metadata Cache ====================
-
     /**
      * Stores metadata for a single block property to enable fast bit-packing.
+     * Values are sorted for deterministic ordering across runs and JVMs.
      */
     @SuppressWarnings("rawtypes")
-    private static class PropertyMeta {
+    private static final class PropertyMeta {
+        /**
+         * The standard Minecraft block property.
+         */
         final Property property;
-        final Object[] values; // Ordered array of possible values
-        final int bits; // Bits needed to represent all values
 
+        /**
+         * The sorted array of all possible values for this property.
+         */
+        final Object[] values;
+
+        /**
+         * The number of bits required to pack an index from the values array.
+         */
+        final int bits;
+
+        /**
+         * Creates property metadata for a given property.
+         *
+         * @param prop the property to metadata-ize
+         */
         @SuppressWarnings("unchecked")
         PropertyMeta(Property<?> prop) {
             this.property = prop;
             Collection<?> valueCollection = prop.getValues();
 
-            // SORT VALUES TO ENSURE DETERMINISTIC ORDER
-            // Most properties in MC use Comparable values
             List<Object> sortedValues = new ArrayList<>(valueCollection);
-            try {
-                sortedValues.sort((o1, o2) -> {
-                    if (o1 instanceof Comparable && o2 instanceof Comparable) {
+            sortedValues.sort((o1, o2) -> {
+                if (o1 instanceof Comparable && o2 instanceof Comparable) {
+                    try {
                         return ((Comparable) o1).compareTo(o2);
+                    } catch (Exception e) {
+                        return o1.toString().compareTo(o2.toString());
                     }
-                    return o1.toString().compareTo(o2.toString()); // Fallback
-                });
-            } catch (Exception e) {
-                // Ignore sort errors, fallback to default order (hope it's stable)
-            }
+                }
+                return o1.toString().compareTo(o2.toString());
+            });
 
             this.values = sortedValues.toArray();
             this.bits = Math.max(1, 32 - Integer.numberOfLeadingZeros(values.length - 1));
@@ -341,7 +405,7 @@ public class CisMapping {
                     return i;
                 }
             }
-            return 0; // Fallback to first value
+            return 0;
         }
 
         /**
@@ -350,12 +414,13 @@ public class CisMapping {
         @SuppressWarnings("unchecked")
         BlockState applyValue(BlockState state, int index) {
             if (index < 0 || index >= values.length) {
-                return state; // Invalid index, keep default
+                return state;
             }
+
             try {
                 return state.with(property, (Comparable) values[index]);
             } catch (Exception e) {
-                return state; // Safety fallback
+                return state;
             }
         }
     }

@@ -7,7 +7,10 @@ import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.objects.Object2IntMap;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
+import it.unimi.dsi.fastutil.objects.Reference2IntMap;
+import it.unimi.dsi.fastutil.objects.Reference2IntOpenHashMap;
 import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.nbt.NbtIo;
 
@@ -18,222 +21,355 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * V5 Encoder for Chunkis format.
- * Uses Paletted Section storage with dynamic property bit-packing.
+ * Encoder for Chunkis CIS format (V7) with paletted section storage and dynamic
+ * property bit-packing.
+ * <p>
+ * This encoder converts a {@link ChunkDelta} into the binary .cis format.
+ * It uses a {@link ThreadLocal} context to reuse buffers and data structures,
+ * significantly reducing garbage collection pressure and improving performance
+ * during intensive world saving operations.
  */
 public final class CisEncoder {
+    private static final int SECTION_VOLUME = 4096;
 
-    // Thread-local reusable context to eliminate GC pressure
+    /**
+     * Thread-local context to minimize allocations during encoding.
+     */
     private static final ThreadLocal<EncoderContext> CONTEXT = ThreadLocal.withInitial(EncoderContext::new);
 
+    /**
+     * Private constructor to prevent instantiation.
+     */
     private CisEncoder() {
     }
 
+    /**
+     * Encodes a ChunkDelta into the Chunkis V7 binary format.
+     *
+     * @param delta   the ChunkDelta to encode
+     * @param mapping the block state mapping for property serialization
+     * @return the encoded byte array
+     * @throws IOException if encoding fails
+     */
     public static byte[] encode(ChunkDelta delta, CisMapping mapping) throws IOException {
         EncoderContext ctx = CONTEXT.get();
         ctx.reset();
 
         DataOutputStream dos = new DataOutputStream(ctx.mainBuffer);
 
-        // 1. Header
-        dos.writeInt(CisConstants.MAGIC);
-        dos.writeInt(CisConstants.VERSION);
-
-        // 2. Build Global Palette from ChunkDelta
-        // CRITICAL: Ensure AIR is in the palette. If the delta only contains "Stone",
-        // implicit air (nulls in sparse sections) will be mapped to global ID 0.
-        // If ID 0 is Stone, all Air becomes Stone. We must ensure ID for AIR exists.
-        List<BlockState> globalPalette = new ArrayList<>(delta.getBlockPalette().getAll());
-        BlockState airState = net.minecraft.block.Blocks.AIR.getDefaultState();
-        if (!globalPalette.contains(airState)) {
-            globalPalette.add(0, airState);
-        }
-
-        ctx.globalIdMap.defaultReturnValue(-1);
-
-        // Write palette size
-        dos.writeInt(globalPalette.size());
-
-        // Write each palette entry: blockId (short) + property data (variable bits)
-        // We write block ID to main stream, properties to bit stream
-        ctx.bitWriter.reset();
-
-        for (int i = 0; i < globalPalette.size(); i++) {
-            BlockState state = globalPalette.get(i);
-            int blockId = mapping.getBlockId(state);
-
-            // Write block ID to byte stream
-            dos.writeShort(blockId);
-
-            // Write property bits
-            mapping.writeStateProperties(ctx.bitWriter, state);
-
-            ctx.globalIdMap.put(state, i);
-        }
-
-        // Flush property bits and write to main stream
-        byte[] palettePropertyData = ctx.bitWriter.toByteArray();
-        dos.writeInt(palettePropertyData.length);
-        dos.write(palettePropertyData);
-
-        // 3. Sections - Build CisChunk from delta
+        // 1. Convert to sparse chunk representation
         CisChunk chunk = CisChunk.fromDelta(delta);
-        Int2ObjectMap<CisSection> sections = chunk.getSections();
-        int[] sortedSections = chunk.getSortedSectionIndices();
 
-        // Write section count
-        dos.writeShort(sortedSections.length);
+        // 2. Discover all used block states
+        List<BlockState> usedStates = collectUsedStates(chunk);
 
-        // Encode each section
-        ctx.bitWriter.reset();
-        for (int sectionY : sortedSections) {
-            encodeSection(ctx, sectionY, sections.get(sectionY));
-        }
-        ctx.bitWriter.flush();
-
-        // Write section data
-        byte[] sectionData = ctx.bitWriter.toByteArray();
-        dos.writeInt(sectionData.length);
-        dos.write(sectionData);
-
-        // 4. Block Entities
-        Long2ObjectMap<NbtCompound> bes = (Long2ObjectMap<NbtCompound>) delta.getBlockEntities();
-        dos.writeInt(bes.size());
-
-        for (Long2ObjectMap.Entry<NbtCompound> entry : bes.long2ObjectEntrySet()) {
-            long p = entry.getLongKey();
-            NbtCompound nbt = entry.getValue();
-
-            dos.writeByte(BlockInstruction.unpackX(p));
-            dos.writeInt(BlockInstruction.unpackY(p));
-            dos.writeByte(BlockInstruction.unpackZ(p));
-            NbtIo.writeCompound(nbt, dos);
-        }
-
-        // 5. Entities
-        List<NbtCompound> entities = delta.getEntitiesList();
-        int entityCount = (entities != null) ? entities.size() : 0;
-        dos.writeInt(entityCount);
-
-        if (entityCount > 0 && entities != null) {
-            for (NbtCompound entity : entities) {
-                NbtIo.writeCompound(entity, dos);
-            }
-        }
+        writeHeader(dos);
+        writeGlobalPalette(dos, ctx, usedStates, mapping);
+        writeSections(dos, ctx, chunk);
+        writeBlockEntities(dos, delta);
+        writeEntities(dos, delta);
 
         return ctx.mainBuffer.toByteArray();
     }
 
     /**
-     * Encodes a 16x16x16 section using paletted storage.
-     * Format:
-     * - Section Y (ZigZag encoded, 8 bits)
-     * - Local Palette Size (8 bits)
-     * - Local Palette Entries (each is a global palette index, using
-     * ceil(log2(globalSize)) bits)
-     * - Block Data (4096 entries, each using ceil(log2(localPaletteSize)) bits)
+     * Collects all unique block states actually used across all sections of the
+     * chunk.
+     * Always includes {@link Blocks#AIR} as the first entry (id 0).
+     *
+     * @param chunk the chunk to scan
+     * @return a list of unique block states
      */
-    private static void encodeSection(EncoderContext ctx, int sectionY, CisSection section) {
-        // Write section Y (ZigZag encoded)
-        ctx.bitWriter.writeZigZag(sectionY, 8);
+    private static List<BlockState> collectUsedStates(CisChunk chunk) {
+        Object2IntMap<BlockState> uniqueStates = new Object2IntOpenHashMap<>();
+        BlockState air = Blocks.AIR.getDefaultState();
+        uniqueStates.put(air, 0); // Always include air
 
-        // Build local palette (unique states in this section)
-        ctx.localPalette.clear();
-        ctx.localPaletteIndex.clear();
-        ctx.localPaletteIndex.defaultReturnValue(-1);
-
-        // Scan section for unique states
-        for (int y = 0; y < 16; y++) {
-            for (int z = 0; z < 16; z++) {
-                for (int x = 0; x < 16; x++) {
-                    BlockState state = section.getBlock(x, y, z);
+        for (CisSection section : chunk.getSections().values()) {
+            if (section.mode == CisSection.MODE_SPARSE) {
+                for (int i = 0; i < section.sparseSize; i++) {
+                    uniqueStates.put(section.sparseValues[i], 0);
+                }
+            } else if (section.mode == CisSection.MODE_DENSE) {
+                for (BlockState state : section.denseBlocks) {
                     if (state != null && !state.isAir()) {
-                        int globalIdx = ctx.globalIdMap.getInt(state);
-                        if (globalIdx == -1)
-                            continue; // Safety
-
-                        if (!ctx.localPaletteIndex.containsKey(globalIdx)) {
-                            ctx.localPaletteIndex.put(globalIdx, ctx.localPalette.size());
-                            ctx.localPalette.add(globalIdx);
-                        }
+                        uniqueStates.put(state, 0);
                     }
                 }
             }
         }
 
-        int localSize = ctx.localPalette.size();
+        return new ArrayList<>(uniqueStates.keySet());
+    }
 
-        // Handle empty sections (all air)
-        if (localSize == 0) {
-            ctx.bitWriter.write(0, 8); // Palette size = 0
+    /**
+     * Writes the CIS file header (magic and version).
+     *
+     * @param dos the output stream
+     * @throws IOException if an error occurs during writing
+     */
+    private static void writeHeader(DataOutputStream dos) throws IOException {
+        dos.writeInt(CisConstants.MAGIC);
+        dos.writeInt(CisConstants.VERSION);
+    }
+
+    /**
+     * Writes the global palette, including block IDs and their encoded properties.
+     *
+     * @param dos           the output stream
+     * @param ctx           the encoder context
+     * @param globalPalette the list of unique states to write
+     * @param mapping       the block state mapping
+     * @throws IOException if an error occurs during writing
+     */
+    private static void writeGlobalPalette(DataOutputStream dos, EncoderContext ctx, List<BlockState> globalPalette,
+            CisMapping mapping) throws IOException {
+        ctx.globalIdMap.defaultReturnValue(-1);
+        dos.writeInt(globalPalette.size());
+        ctx.bitWriter.reset();
+
+        for (int i = 0; i < globalPalette.size(); i++) {
+            BlockState state = globalPalette.get(i);
+            dos.writeShort(mapping.getBlockId(state));
+            mapping.writeStateProperties(ctx.bitWriter, state);
+            ctx.globalIdMap.put(state, i);
+        }
+
+        byte[] palettePropertyData = ctx.bitWriter.toByteArray();
+        dos.writeInt(palettePropertyData.length);
+        dos.write(palettePropertyData);
+    }
+
+    /**
+     * Writes all sections in the chunk to the output stream.
+     *
+     * @param dos   the output stream
+     * @param ctx   the encoder context
+     * @param chunk the chunk containing the sections
+     * @throws IOException if an error occurs during writing
+     */
+    private static void writeSections(DataOutputStream dos, EncoderContext ctx, CisChunk chunk) throws IOException {
+        Int2ObjectMap<CisSection> sections = chunk.getSections();
+        int[] sortedSections = chunk.getSortedSectionIndices();
+
+        dos.writeShort(sortedSections.length);
+        ctx.bitWriter.reset();
+
+        for (int sectionY : sortedSections) {
+            encodeSection(ctx, sectionY, sections.get(sectionY));
+        }
+        ctx.bitWriter.flush();
+
+        byte[] sectionData = ctx.bitWriter.toByteArray();
+        dos.writeInt(sectionData.length);
+        dos.write(sectionData);
+    }
+
+    /**
+     * Writes block entity data (NBT) for the chunk.
+     *
+     * @param dos   the output stream
+     * @param delta the source delta
+     * @throws IOException if an error occurs during writing
+     */
+    private static void writeBlockEntities(DataOutputStream dos, ChunkDelta delta) throws IOException {
+        Long2ObjectMap<NbtCompound> bes = delta.getBlockEntities();
+        dos.writeInt(bes.size());
+
+        for (Long2ObjectMap.Entry<NbtCompound> entry : bes.long2ObjectEntrySet()) {
+            long p = entry.getLongKey();
+            int packedPos = (int) BlockInstruction.packPos(
+                    BlockInstruction.unpackX(p),
+                    BlockInstruction.unpackY(p),
+                    BlockInstruction.unpackZ(p));
+            dos.writeInt(packedPos);
+            NbtIo.writeCompound(entry.getValue(), dos);
+        }
+    }
+
+    /**
+     * Writes global entity data (NBT) for the chunk.
+     *
+     * @param dos   the output stream
+     * @param delta the source delta
+     * @throws IOException if an error occurs during writing
+     */
+    private static void writeEntities(DataOutputStream dos, ChunkDelta delta) throws IOException {
+        List<NbtCompound> entities = delta.getEntitiesList();
+        int entityCount = (entities != null) ? entities.size() : 0;
+        dos.writeInt(entityCount);
+
+        if (entityCount > 0) {
+            for (NbtCompound entity : entities) {
+                NbtIo.writeCompound(entity, dos);
+            }
+        }
+    }
+
+    /**
+     * Encodes a single chunk section using zigzag encoding for height and
+     * automatically choosing between sparse and dense modes.
+     *
+     * @param ctx      the encoder context
+     * @param sectionY the section's Y index
+     * @param section  the section data
+     */
+    private static void encodeSection(EncoderContext ctx, int sectionY, CisSection section) {
+        ctx.bitWriter.writeZigZag(sectionY, CisConstants.SECTION_Y_BITS);
+
+        if (section.mode == CisSection.MODE_EMPTY) {
+            ctx.bitWriter.write(CisConstants.SECTION_ENCODING_SPARSE, 1);
+            ctx.bitWriter.write(0, CisConstants.BLOCK_COUNT_BITS);
             return;
         }
 
-        // Add AIR as index 0 if not present (for sparse sections)
-        int airGlobalIdx = ctx.globalIdMap.getInt(net.minecraft.block.Blocks.AIR.getDefaultState());
-        if (airGlobalIdx == -1)
-            airGlobalIdx = 0; // AIR should always be 0
-
-        boolean hasAir = ctx.localPaletteIndex.containsKey(airGlobalIdx);
-        if (!hasAir) {
-            // Insert air at index 0, shift others
-            for (int globalIdx : ctx.localPalette) {
-                ctx.localPaletteIndex.put(globalIdx, ctx.localPaletteIndex.get(globalIdx) + 1);
-            }
-            ctx.localPalette.add(0, airGlobalIdx);
-            ctx.localPaletteIndex.put(airGlobalIdx, 0);
-            localSize++;
+        if (section.mode == CisSection.MODE_SPARSE) {
+            encodeSparseSection(ctx, section);
+        } else {
+            encodeDenseSection(ctx, section);
         }
+    }
 
-        // Write local palette size
-        ctx.bitWriter.write(localSize, 8);
+    /**
+     * Encodes a section in sparse mode (position-state pairs).
+     *
+     * @param ctx     the encoder context
+     * @param section the section data
+     */
+    private static void encodeSparseSection(EncoderContext ctx, CisSection section) {
+        ctx.bitWriter.write(CisConstants.SECTION_ENCODING_SPARSE, 1);
+        ctx.bitWriter.write(section.sparseSize, CisConstants.BLOCK_COUNT_BITS);
 
-        // Write local palette entries (global indices)
-        int globalBits = Math.max(1, 32 - Integer.numberOfLeadingZeros(Math.max(1, ctx.globalIdMap.size() - 1)));
+        if (section.sparseSize > 0) {
+            int globalBits = calculateBitsNeeded(ctx.globalIdMap.size());
+
+            for (int i = 0; i < section.sparseSize; i++) {
+                ctx.bitWriter.write(section.sparseKeys[i] & 0xFFFF, 12);
+
+                int globalIdx = ctx.globalIdMap.getInt(section.sparseValues[i]);
+                ctx.bitWriter.write(globalIdx != -1 ? globalIdx : 0, globalBits);
+            }
+        }
+    }
+
+    /**
+     * Encodes a section in dense mode (local palette + bit-packed indices).
+     *
+     * @param ctx     the encoder context
+     * @param section the section data
+     */
+    private static void encodeDenseSection(EncoderContext ctx, CisSection section) {
+        ctx.bitWriter.write(CisConstants.SECTION_ENCODING_DENSE, 1);
+
+        ctx.fastLocalPaletteIndex.clear();
+        ctx.fastLocalPaletteIndex.defaultReturnValue(-1);
+        ctx.localPalette.clear();
+
+        buildLocalPalette(ctx, section.denseBlocks);
+
+        int localAirIndex = ensureAirInPalette(ctx);
+        int localSize = ctx.localPalette.size();
+
+        ctx.bitWriter.write(localSize, CisConstants.PALETTE_SIZE_BITS);
+
+        int globalBits = calculateBitsNeeded(ctx.globalIdMap.size());
         for (int globalIdx : ctx.localPalette) {
             ctx.bitWriter.write(globalIdx, globalBits);
         }
 
-        // Calculate bits per block
-        int bitsPerBlock = (localSize > 1) ? Math.max(1, 32 - Integer.numberOfLeadingZeros(localSize - 1)) : 0;
-
-        // Write block data (4096 entries)
+        int bitsPerBlock = calculateBitsNeeded(localSize);
         if (bitsPerBlock > 0) {
-            for (int y = 0; y < 16; y++) {
-                for (int z = 0; z < 16; z++) {
-                    for (int x = 0; x < 16; x++) {
-                        BlockState state = section.getBlock(x, y, z);
-                        int localIdx;
-
-                        if (state == null || state.isAir()) {
-                            localIdx = ctx.localPaletteIndex.get(airGlobalIdx);
-                        } else {
-                            int globalIdx = ctx.globalIdMap.getInt(state);
-                            localIdx = ctx.localPaletteIndex.get(globalIdx);
-                            if (localIdx == -1)
-                                localIdx = 0; // Fallback to air
-                        }
-
-                        ctx.bitWriter.write(localIdx, bitsPerBlock);
-                    }
-                }
-            }
+            writeBlockData(ctx, section.denseBlocks, localAirIndex, bitsPerBlock);
         }
-        // If bitsPerBlock == 0, entire section is single block type (no data needed)
     }
 
     /**
-     * Reusable encoder context to prevent per-call allocations.
+     * Scans the section to build a local palette of unique block states.
+     *
+     * @param ctx    the encoder context
+     * @param states the array of block states in the section
      */
-    private static class EncoderContext {
+    private static void buildLocalPalette(EncoderContext ctx, BlockState[] states) {
+        for (int i = 0; i < SECTION_VOLUME; i++) {
+            BlockState state = states[i];
+            if (state != null && !state.isAir() && !ctx.fastLocalPaletteIndex.containsKey(state)) {
+                int globalIdx = ctx.globalIdMap.getInt(state);
+                if (globalIdx != -1) {
+                    ctx.fastLocalPaletteIndex.put(state, ctx.localPalette.size());
+                    ctx.localPalette.add(globalIdx);
+                }
+            }
+        }
+    }
+
+    /**
+     * Ensures that the air block state is present in the local palette.
+     *
+     * @param ctx the encoder context
+     * @return the local index of the air state
+     */
+    private static int ensureAirInPalette(EncoderContext ctx) {
+        BlockState airState = Blocks.AIR.getDefaultState();
+
+        if (ctx.fastLocalPaletteIndex.containsKey(airState)) {
+            return ctx.fastLocalPaletteIndex.getInt(airState);
+        }
+
+        int airGlobalIdx = ctx.globalIdMap.getInt(airState);
+        if (airGlobalIdx == -1) {
+            airGlobalIdx = 0;
+        }
+
+        int localAirIndex = ctx.localPalette.size();
+        ctx.localPalette.add(airGlobalIdx);
+        ctx.fastLocalPaletteIndex.put(airState, localAirIndex);
+        return localAirIndex;
+    }
+
+    /**
+     * Writes bit-packed local palette indices for all blocks in the section.
+     *
+     * @param ctx           the encoder context
+     * @param states        the block states to write
+     * @param localAirIndex the palette index to use for air or null states
+     * @param bitsPerBlock  the number of bits to use per block index
+     */
+    private static void writeBlockData(EncoderContext ctx, BlockState[] states, int localAirIndex, int bitsPerBlock) {
+        for (int i = 0; i < SECTION_VOLUME; i++) {
+            BlockState state = states[i];
+            int localIdx = (state == null || state.isAir())
+                    ? localAirIndex
+                    : ctx.fastLocalPaletteIndex.getInt(state);
+
+            ctx.bitWriter.write(localIdx, bitsPerBlock);
+        }
+    }
+
+    /**
+     * Calculates the number of bits needed to represent a value up to
+     * {@code maxValue}.
+     *
+     * @param maxValue the maximum value to represent
+     * @return the number of bits required
+     */
+    private static int calculateBitsNeeded(int maxValue) {
+        return Math.max(1, 32 - Integer.numberOfLeadingZeros(Math.max(1, maxValue - 1)));
+    }
+
+    /**
+     * Reusable encoder context to minimize allocations and garbage collection
+     * pressure.
+     */
+    private static final class EncoderContext {
         final ByteArrayOutputStream mainBuffer = new ByteArrayOutputStream(16384);
         final BitWriter bitWriter = new BitWriter(8192);
         final Object2IntMap<BlockState> globalIdMap = new Object2IntOpenHashMap<>();
-
-        // Section-level workspace
         final List<Integer> localPalette = new ArrayList<>(64);
-        final it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap localPaletteIndex = new it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap();
+        final Reference2IntMap<BlockState> fastLocalPaletteIndex = new Reference2IntOpenHashMap<>();
 
+        /**
+         * Resets the context for a new encoding operation.
+         */
         void reset() {
             mainBuffer.reset();
             globalIdMap.clear();
