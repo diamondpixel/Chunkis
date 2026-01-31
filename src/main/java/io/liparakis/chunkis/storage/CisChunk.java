@@ -1,11 +1,7 @@
 package io.liparakis.chunkis.storage;
 
-import io.liparakis.chunkis.core.BlockInstruction;
-import io.liparakis.chunkis.core.ChunkDelta;
-import io.liparakis.chunkis.core.Palette;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
-import net.minecraft.block.BlockState;
 
 import java.util.Arrays;
 
@@ -14,8 +10,10 @@ import java.util.Arrays;
  * operations.
  * Uses primitive collections and spatial locality caching for high-performance
  * operations.
+ *
+ * @param <S> the type representing a block state
  */
-public final class CisChunk {
+public final class CisChunk<S> {
     /**
      * Bit-shift value for world Y to section Y conversion.
      */
@@ -29,7 +27,7 @@ public final class CisChunk {
     /**
      * Map of section Y-indices to their storage objects.
      */
-    private final Int2ObjectMap<CisSection> sections;
+    private final Int2ObjectMap<CisSection<S>> sections;
 
     /**
      * The Y-index of the last accessed section (for caching).
@@ -39,7 +37,7 @@ public final class CisChunk {
     /**
      * The last accessed section instance (for caching).
      */
-    private CisSection lastSection;
+    private CisSection<S> lastSection;
 
     /**
      * Creates a new empty CisChunk.
@@ -57,18 +55,18 @@ public final class CisChunk {
      * @param x     the local chunk X coordinate (0-15)
      * @param y     the world Y coordinate
      * @param z     the local chunk Z coordinate (0-15)
-     * @param state the BlockState to set
+     * @param state the block state to set
      */
-    public void addBlock(int x, int y, int z, BlockState state) {
+    public void addBlock(int x, int y, int z, S state) {
         int sectionY = y >> SECTION_SHIFT;
 
-        CisSection section;
+        CisSection<S> section;
         if (sectionY == lastSectionY && lastSection != null) {
             section = lastSection;
         } else {
             section = sections.get(sectionY);
             if (section == null) {
-                section = new CisSection();
+                section = new CisSection<>();
                 this.sections.put(sectionY, section);
             }
             lastSectionY = sectionY;
@@ -79,32 +77,12 @@ public final class CisChunk {
     }
 
     /**
-     * Reconstructs a CisChunk from a compressed delta.
-     * Performance is optimal when BlockInstructions are sorted by Y coordinate.
-     *
-     * @param delta the ChunkDelta containing block instructions and palette
-     * @return a new CisChunk populated with the delta's blocks
-     */
-    public static CisChunk fromDelta(ChunkDelta delta) {
-        CisChunk chunk = new CisChunk();
-        Palette<BlockState> palette = delta.getBlockPalette();
-
-        for (BlockInstruction ins : delta.getBlockInstructions()) {
-            BlockState state = palette.get(ins.paletteIndex());
-            if (state != null) {
-                chunk.addBlock(ins.x(), ins.y(), ins.z(), state);
-            }
-        }
-        return chunk;
-    }
-
-    /**
      * Returns the raw map of section Y indices to CisSection objects.
      * Note: The returned map is not sorted by key.
      *
      * @return the internal sections map
      */
-    public Int2ObjectMap<CisSection> getSections() {
+    public Int2ObjectMap<CisSection<S>> getSections() {
         return sections;
     }
 

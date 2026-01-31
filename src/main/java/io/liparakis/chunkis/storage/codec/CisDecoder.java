@@ -4,8 +4,8 @@ import io.liparakis.chunkis.core.BlockInstruction;
 import io.liparakis.chunkis.core.ChunkDelta;
 import io.liparakis.chunkis.core.Palette;
 import io.liparakis.chunkis.storage.BitUtils.BitReader;
+import io.liparakis.chunkis.storage.CisAdapter;
 import io.liparakis.chunkis.storage.CisConstants;
-import io.liparakis.chunkis.storage.CisMapping;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.nbt.NbtCompound;
@@ -69,11 +69,11 @@ public final class CisDecoder {
      * mapping.
      *
      * @param data    the encoded CIS format data
-     * @param mapping the block state mapping for property deserialization
+     * @param adapter the block state adapter for property deserialization
      * @return the decoded ChunkDelta
      * @throws IOException if the data is invalid or corrupted
      */
-    public ChunkDelta decode(byte[] data, CisMapping mapping) throws IOException {
+    public ChunkDelta decode(byte[] data, CisAdapter<BlockState> adapter) throws IOException {
         if (data.length < HEADER_SIZE) {
             throw new IOException(String.format(
                     "CIS file too short: got %d bytes, need at least %d",
@@ -85,7 +85,7 @@ public final class CisDecoder {
         ChunkDelta delta = new ChunkDelta();
         Palette<BlockState> palette = delta.getBlockPalette();
 
-        offset = decodeGlobalPalette(data, offset, mapping, palette);
+        offset = decodeGlobalPalette(data, offset, adapter, palette);
         offset = decodeSections(data, offset, delta);
         decodeBlockEntitiesAndEntities(data, offset, delta);
 
@@ -118,18 +118,19 @@ public final class CisDecoder {
     /**
      * Decodes the global palette from the data stream.
      * <p>
-     * Reconstructs the block states using the provided {@link CisMapping} and the
+     * Reconstructs the block states using the provided {@link CisAdapter} and the
      * encoded
      * property bit stream.
      *
      * @param data    the encoded data
      * @param offset  the current reading offset
-     * @param mapping the block state mapping
+     * @param adapter the block state adapter
      * @param palette the target palette to populate
      * @return the updated offset after reading the palette
      * @throws IOException if the palette data is corrupted or truncated
      */
-    private int decodeGlobalPalette(byte[] data, int offset, CisMapping mapping, Palette<BlockState> palette)
+    private int decodeGlobalPalette(byte[] data, int offset, CisAdapter<BlockState> adapter,
+            Palette<BlockState> palette)
             throws IOException {
         if (offset + 4 > data.length) {
             throw new IOException("Truncated data: cannot read global palette size");
@@ -180,7 +181,7 @@ public final class CisDecoder {
 
         globalPalette = new ArrayList<>(globalPaletteSize);
         for (int i = 0; i < globalPaletteSize; i++) {
-            BlockState state = mapping.readStateProperties(propertyReader, blockIds[i]);
+            BlockState state = adapter.readStateProperties(propertyReader, blockIds[i]);
             globalPalette.add(state);
             palette.getOrAdd(state);
         }

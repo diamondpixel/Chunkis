@@ -131,7 +131,6 @@ public abstract class ThreadedAnvilChunkStorageMixin {
             }
         }
 
-        // CRITICAL: Mark chunk as saved so key doesn't get re-added to dirty queue
         chunk.setNeedsSaving(false);
 
         cir.setReturnValue(true); // Suppress vanilla save

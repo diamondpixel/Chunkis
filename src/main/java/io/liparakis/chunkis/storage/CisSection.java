@@ -1,7 +1,5 @@
 package io.liparakis.chunkis.storage;
 
-import net.minecraft.block.BlockState;
-
 import java.util.Arrays;
 
 /**
@@ -9,8 +7,10 @@ import java.util.Arrays;
  * Automatically switches between sparse and dense storage modes based on
  * occupancy.
  * Optimized for branch prediction and minimal garbage collection pressure.
+ *
+ * @param <S> the type representing a block state
  */
-public final class CisSection {
+public final class CisSection<S> {
     private static final int VOLUME = 4096;
     private static final int INITIAL_SPARSE_CAPACITY = 4;
     private static final int COORD_MASK = 0xFFFF;
@@ -43,7 +43,7 @@ public final class CisSection {
     /**
      * Block states associated with keys (sparse mode).
      */
-    public BlockState[] sparseValues;
+    public Object[] sparseValues;
 
     /**
      * Number of blocks currently in sparse storage.
@@ -53,7 +53,7 @@ public final class CisSection {
     /**
      * Flat array of block states (dense mode).
      */
-    public BlockState[] denseBlocks;
+    public Object[] denseBlocks;
 
     /**
      * Number of non-air blocks in dense storage.
@@ -72,9 +72,9 @@ public final class CisSection {
      * @param x     local X coordinate (0-15)
      * @param y     local Y coordinate (0-15)
      * @param z     local Z coordinate (0-15)
-     * @param state the BlockState to set, or null for air
+     * @param state the block state to set, or null for air
      */
-    public void setBlock(int x, int y, int z, BlockState state) {
+    public void setBlock(int x, int y, int z, S state) {
         short key = packCoordinate(x, y, z);
         boolean isAir = isAirOrNull(state);
 
@@ -121,7 +121,7 @@ public final class CisSection {
      * @param state the state to check
      * @return true if null
      */
-    private static boolean isAirOrNull(BlockState state) {
+    private boolean isAirOrNull(S state) {
         return state == null;
     }
 
@@ -133,9 +133,10 @@ public final class CisSection {
      * @param state the block state
      * @param isAir whether the new state is effectively air/null
      */
-    private void setBlockDense(short key, BlockState state, boolean isAir) {
+    private void setBlockDense(short key, S state, boolean isAir) {
         int index = key & COORD_MASK;
-        BlockState old = denseBlocks[index];
+        @SuppressWarnings("unchecked")
+        S old = (S) denseBlocks[index];
         boolean wasAir = isAirOrNull(old);
 
         if (isAir) {
@@ -162,7 +163,7 @@ public final class CisSection {
      * @param state the block state
      * @param isAir whether the new state is effectively air/null
      */
-    private void setBlockSparse(short key, BlockState state, boolean isAir) {
+    private void setBlockSparse(short key, S state, boolean isAir) {
         int index = findSparseIndex(key);
 
         if (isAir) {
@@ -219,7 +220,7 @@ public final class CisSection {
      * @param key   the packed coordinate key
      * @param state the block state
      */
-    private void addSparseEntry(short key, BlockState state) {
+    private void addSparseEntry(short key, S state) {
         if (sparseSize >= CisConstants.MAX_SPARSE_CAPACITY) {
             convertToDense();
             setBlockDense(key, state, false);
@@ -240,10 +241,10 @@ public final class CisSection {
      * @param key   the packed coordinate key
      * @param state the block state
      */
-    private void initializeSparse(short key, BlockState state) {
+    private void initializeSparse(short key, S state) {
         mode = MODE_SPARSE;
         sparseKeys = new short[INITIAL_SPARSE_CAPACITY];
-        sparseValues = new BlockState[INITIAL_SPARSE_CAPACITY];
+        sparseValues = new Object[INITIAL_SPARSE_CAPACITY];
         sparseKeys[0] = key;
         sparseValues[0] = state;
         sparseSize = 1;
@@ -263,7 +264,7 @@ public final class CisSection {
      * Occurs when the number of modified blocks exceeds the sparse threshold.
      */
     private void convertToDense() {
-        denseBlocks = new BlockState[VOLUME];
+        denseBlocks = new Object[VOLUME];
 
         for (int i = 0; i < sparseSize; i++) {
             denseBlocks[sparseKeys[i] & COORD_MASK] = sparseValues[i];
@@ -282,12 +283,12 @@ public final class CisSection {
      */
     private void convertToSparse() {
         short[] keys = new short[CisConstants.SPARSE_DENSE_THRESHOLD];
-        BlockState[] values = new BlockState[CisConstants.SPARSE_DENSE_THRESHOLD];
+        Object[] values = new Object[CisConstants.SPARSE_DENSE_THRESHOLD];
         int count = 0;
 
         for (int i = 0; i < VOLUME; i++) {
-            BlockState state = denseBlocks[i];
-            if (!isAirOrNull(state)) {
+            Object state = denseBlocks[i];
+            if (state != null) {
                 keys[count] = (short) i;
                 values[count] = state;
                 count++;

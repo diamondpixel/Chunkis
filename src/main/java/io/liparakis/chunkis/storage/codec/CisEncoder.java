@@ -2,10 +2,11 @@ package io.liparakis.chunkis.storage.codec;
 
 import io.liparakis.chunkis.core.BlockInstruction;
 import io.liparakis.chunkis.core.ChunkDelta;
+import io.liparakis.chunkis.core.Palette;
 import io.liparakis.chunkis.storage.BitUtils.BitWriter;
+import io.liparakis.chunkis.storage.CisAdapter;
 import io.liparakis.chunkis.storage.CisChunk;
 import io.liparakis.chunkis.storage.CisConstants;
-import io.liparakis.chunkis.storage.CisMapping;
 import io.liparakis.chunkis.storage.CisSection;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
@@ -51,29 +52,49 @@ public final class CisEncoder {
      * Encodes a ChunkDelta into the Chunkis V7 binary format.
      *
      * @param delta   the ChunkDelta to encode
-     * @param mapping the block state mapping for property serialization
+     * @param adapter the block state adapter for property serialization
      * @return the encoded byte array
      * @throws IOException if encoding fails
      */
-    public static byte[] encode(ChunkDelta delta, CisMapping mapping) throws IOException {
+    public static byte[] encode(ChunkDelta delta, CisAdapter<BlockState> adapter) throws IOException {
         EncoderContext ctx = CONTEXT.get();
         ctx.reset();
 
         DataOutputStream dos = new DataOutputStream(ctx.mainBuffer);
 
         // 1. Convert to sparse chunk representation
-        CisChunk chunk = CisChunk.fromDelta(delta);
+        CisChunk<BlockState> chunk = fromDelta(delta);
 
         // 2. Discover all used block states
         List<BlockState> usedStates = collectUsedStates(chunk);
 
         writeHeader(dos);
-        writeGlobalPalette(dos, ctx, usedStates, mapping);
+        writeGlobalPalette(dos, ctx, usedStates, adapter);
         writeSections(dos, ctx, chunk);
         writeBlockEntities(dos, delta);
         writeEntities(dos, delta);
 
         return ctx.mainBuffer.toByteArray();
+    }
+
+    /**
+     * Reconstructs a CisChunk from a compressed delta.
+     * Performance is optimal when BlockInstructions are sorted by Y coordinate.
+     *
+     * @param delta the ChunkDelta containing block instructions and palette
+     * @return a new CisChunk populated with the delta's blocks
+     */
+    private static CisChunk<BlockState> fromDelta(ChunkDelta delta) {
+        CisChunk<BlockState> chunk = new CisChunk<>();
+        Palette<BlockState> palette = delta.getBlockPalette();
+
+        for (BlockInstruction ins : delta.getBlockInstructions()) {
+            BlockState state = palette.get(ins.paletteIndex());
+            if (state != null) {
+                chunk.addBlock(ins.x(), ins.y(), ins.z(), state);
+            }
+        }
+        return chunk;
     }
 
     /**
@@ -84,18 +105,19 @@ public final class CisEncoder {
      * @param chunk the chunk to scan
      * @return a list of unique block states
      */
-    private static List<BlockState> collectUsedStates(CisChunk chunk) {
+    private static List<BlockState> collectUsedStates(CisChunk<BlockState> chunk) {
         Object2IntMap<BlockState> uniqueStates = new Object2IntOpenHashMap<>();
         BlockState air = Blocks.AIR.getDefaultState();
         uniqueStates.put(air, 0); // Always include air
 
-        for (CisSection section : chunk.getSections().values()) {
+        for (CisSection<BlockState> section : chunk.getSections().values()) {
             if (section.mode == CisSection.MODE_SPARSE) {
                 for (int i = 0; i < section.sparseSize; i++) {
-                    uniqueStates.put(section.sparseValues[i], 0);
+                    uniqueStates.put((BlockState) section.sparseValues[i], 0);
                 }
             } else if (section.mode == CisSection.MODE_DENSE) {
-                for (BlockState state : section.denseBlocks) {
+                for (Object o : section.denseBlocks) {
+                    BlockState state = (BlockState) o;
                     if (state != null && !state.isAir()) {
                         uniqueStates.put(state, 0);
                     }
@@ -123,19 +145,19 @@ public final class CisEncoder {
      * @param dos           the output stream
      * @param ctx           the encoder context
      * @param globalPalette the list of unique states to write
-     * @param mapping       the block state mapping
+     * @param adapter       the block state adapter
      * @throws IOException if an error occurs during writing
      */
     private static void writeGlobalPalette(DataOutputStream dos, EncoderContext ctx, List<BlockState> globalPalette,
-            CisMapping mapping) throws IOException {
+            CisAdapter<BlockState> adapter) throws IOException {
         ctx.globalIdMap.defaultReturnValue(-1);
         dos.writeInt(globalPalette.size());
         ctx.bitWriter.reset();
 
         for (int i = 0; i < globalPalette.size(); i++) {
             BlockState state = globalPalette.get(i);
-            dos.writeShort(mapping.getBlockId(state));
-            mapping.writeStateProperties(ctx.bitWriter, state);
+            dos.writeShort(adapter.getBlockId(state));
+            adapter.writeStateProperties(ctx.bitWriter, state);
             ctx.globalIdMap.put(state, i);
         }
 
@@ -152,8 +174,9 @@ public final class CisEncoder {
      * @param chunk the chunk containing the sections
      * @throws IOException if an error occurs during writing
      */
-    private static void writeSections(DataOutputStream dos, EncoderContext ctx, CisChunk chunk) throws IOException {
-        Int2ObjectMap<CisSection> sections = chunk.getSections();
+    private static void writeSections(DataOutputStream dos, EncoderContext ctx, CisChunk<BlockState> chunk)
+            throws IOException {
+        Int2ObjectMap<CisSection<BlockState>> sections = chunk.getSections();
         int[] sortedSections = chunk.getSortedSectionIndices();
 
         dos.writeShort(sortedSections.length);
@@ -218,7 +241,7 @@ public final class CisEncoder {
      * @param sectionY the section's Y index
      * @param section  the section data
      */
-    private static void encodeSection(EncoderContext ctx, int sectionY, CisSection section) {
+    private static void encodeSection(EncoderContext ctx, int sectionY, CisSection<BlockState> section) {
         ctx.bitWriter.writeZigZag(sectionY, CisConstants.SECTION_Y_BITS);
 
         if (section.mode == CisSection.MODE_EMPTY) {
@@ -240,7 +263,7 @@ public final class CisEncoder {
      * @param ctx     the encoder context
      * @param section the section data
      */
-    private static void encodeSparseSection(EncoderContext ctx, CisSection section) {
+    private static void encodeSparseSection(EncoderContext ctx, CisSection<BlockState> section) {
         ctx.bitWriter.write(CisConstants.SECTION_ENCODING_SPARSE, 1);
         ctx.bitWriter.write(section.sparseSize, CisConstants.BLOCK_COUNT_BITS);
 
@@ -262,7 +285,7 @@ public final class CisEncoder {
      * @param ctx     the encoder context
      * @param section the section data
      */
-    private static void encodeDenseSection(EncoderContext ctx, CisSection section) {
+    private static void encodeDenseSection(EncoderContext ctx, CisSection<BlockState> section) {
         ctx.bitWriter.write(CisConstants.SECTION_ENCODING_DENSE, 1);
 
         ctx.fastLocalPaletteIndex.clear();
@@ -291,11 +314,11 @@ public final class CisEncoder {
      * Scans the section to build a local palette of unique block states.
      *
      * @param ctx    the encoder context
-     * @param states the array of block states in the section
+     * @param states the array of block states in the section (as Object[])
      */
-    private static void buildLocalPalette(EncoderContext ctx, BlockState[] states) {
+    private static void buildLocalPalette(EncoderContext ctx, Object[] states) {
         for (int i = 0; i < SECTION_VOLUME; i++) {
-            BlockState state = states[i];
+            BlockState state = (BlockState) states[i];
             if (state != null && !state.isAir() && !ctx.fastLocalPaletteIndex.containsKey(state)) {
                 int globalIdx = ctx.globalIdMap.getInt(state);
                 if (globalIdx != -1) {
@@ -334,13 +357,13 @@ public final class CisEncoder {
      * Writes bit-packed local palette indices for all blocks in the section.
      *
      * @param ctx           the encoder context
-     * @param states        the block states to write
+     * @param states        the block states to write (as Object[])
      * @param localAirIndex the palette index to use for air or null states
      * @param bitsPerBlock  the number of bits to use per block index
      */
-    private static void writeBlockData(EncoderContext ctx, BlockState[] states, int localAirIndex, int bitsPerBlock) {
+    private static void writeBlockData(EncoderContext ctx, Object[] states, int localAirIndex, int bitsPerBlock) {
         for (int i = 0; i < SECTION_VOLUME; i++) {
-            BlockState state = states[i];
+            BlockState state = (BlockState) states[i];
             int localIdx = (state == null || state.isAir())
                     ? localAirIndex
                     : ctx.fastLocalPaletteIndex.getInt(state);

@@ -2,6 +2,7 @@ package io.liparakis.chunkis.storage.codec;
 
 import io.liparakis.chunkis.core.BlockInstruction;
 import io.liparakis.chunkis.core.ChunkDelta;
+import io.liparakis.chunkis.core.Palette;
 import io.liparakis.chunkis.storage.BitUtils.BitWriter;
 import io.liparakis.chunkis.storage.CisChunk;
 import io.liparakis.chunkis.storage.CisConstants;
@@ -156,7 +157,7 @@ public final class CisNetworkEncoder {
         ctx.reset();
 
         DataOutputStream dos = new DataOutputStream(ctx.mainBuffer);
-        CisChunk chunk = CisChunk.fromDelta(delta);
+        CisChunk<BlockState> chunk = fromDelta(delta);
 
         // Collect all unique block states used in this chunk
         List<BlockState> usedStates = collectUsedStates(chunk);
@@ -168,6 +169,26 @@ public final class CisNetworkEncoder {
         writeEntities(dos, delta);
 
         return ctx.mainBuffer.toByteArray();
+    }
+
+    /**
+     * Reconstructs a CisChunk from a compressed delta.
+     * Performance is optimal when BlockInstructions are sorted by Y coordinate.
+     *
+     * @param delta the ChunkDelta containing block instructions and palette
+     * @return a new CisChunk populated with the delta's blocks
+     */
+    private static CisChunk<BlockState> fromDelta(ChunkDelta delta) {
+        CisChunk<BlockState> chunk = new CisChunk<>();
+        Palette<BlockState> palette = delta.getBlockPalette();
+
+        for (BlockInstruction ins : delta.getBlockInstructions()) {
+            BlockState state = palette.get(ins.paletteIndex());
+            if (state != null) {
+                chunk.addBlock(ins.x(), ins.y(), ins.z(), state);
+            }
+        }
+        return chunk;
     }
 
     /**
@@ -192,7 +213,7 @@ public final class CisNetworkEncoder {
      * @param chunk The chunk to scan
      * @return List of unique block states (AIR always first)
      */
-    private static List<BlockState> collectUsedStates(CisChunk chunk) {
+    private static List<BlockState> collectUsedStates(CisChunk<BlockState> chunk) {
         // Use Reference2IntOpenHashMap for faster identity-based lookups
         // BlockState instances are interned, so identity comparison is valid
         Reference2IntMap<BlockState> uniqueStates = new Reference2IntOpenHashMap<>(TYPICAL_PALETTE_SIZE);
@@ -203,18 +224,19 @@ public final class CisNetworkEncoder {
         uniqueStates.put(air, 0);
 
         // Scan all sections for unique states
-        for (CisSection section : chunk.getSections().values()) {
+        for (CisSection<BlockState> section : chunk.getSections().values()) {
             if (section.mode == CisSection.MODE_SPARSE) {
                 // Sparse sections: scan sparse values array
                 for (int i = 0; i < section.sparseSize; i++) {
-                    BlockState state = section.sparseValues[i];
+                    BlockState state = (BlockState) section.sparseValues[i];
                     if (state != null) {
                         uniqueStates.putIfAbsent(state, 0);
                     }
                 }
             } else if (section.mode == CisSection.MODE_DENSE) {
                 // Dense sections: scan all 4096 blocks
-                for (BlockState state : section.denseBlocks) {
+                for (Object o : section.denseBlocks) {
+                    BlockState state = (BlockState) o;
                     if (state != null && !state.isAir()) {
                         uniqueStates.putIfAbsent(state, 0);
                     }
@@ -350,7 +372,7 @@ public final class CisNetworkEncoder {
          *
          * @param prop The Minecraft property
          */
-        @SuppressWarnings({"unchecked", "rawtypes"})
+        @SuppressWarnings({ "unchecked", "rawtypes" })
         private PropertyMeta(Property<?> prop) {
             this.property = prop;
 
@@ -428,9 +450,9 @@ public final class CisNetworkEncoder {
      * @param chunk The chunk containing sections
      * @throws IOException if write fails
      */
-    private static void writeSections(DataOutputStream dos, NetEncoderContext ctx, CisChunk chunk)
+    private static void writeSections(DataOutputStream dos, NetEncoderContext ctx, CisChunk<BlockState> chunk)
             throws IOException {
-        Int2ObjectMap<CisSection> sections = chunk.getSections();
+        Int2ObjectMap<CisSection<BlockState>> sections = chunk.getSections();
         int[] sortedSections = chunk.getSortedSectionIndices();
 
         dos.writeShort(sortedSections.length);
@@ -463,7 +485,7 @@ public final class CisNetworkEncoder {
      * @param sectionY Section Y coordinate
      * @param section  The section to encode
      */
-    private static void encodeSection(NetEncoderContext ctx, int sectionY, CisSection section) {
+    private static void encodeSection(NetEncoderContext ctx, int sectionY, CisSection<BlockState> section) {
         // Write section Y coordinate with ZigZag encoding for negative values
         ctx.bitWriter.writeZigZag(sectionY, CisConstants.SECTION_Y_BITS);
 
@@ -497,7 +519,7 @@ public final class CisNetworkEncoder {
      * @param ctx     Encoder context
      * @param section The section to encode
      */
-    private static void encodeSparseSection(NetEncoderContext ctx, CisSection section) {
+    private static void encodeSparseSection(NetEncoderContext ctx, CisSection<BlockState> section) {
         ctx.bitWriter.write(CisConstants.SECTION_ENCODING_SPARSE, 1);
         ctx.bitWriter.write(section.sparseSize, CisConstants.BLOCK_COUNT_BITS);
 
@@ -540,7 +562,7 @@ public final class CisNetworkEncoder {
      * @param ctx     Encoder context
      * @param section The section to encode
      */
-    private static void encodeDenseSection(NetEncoderContext ctx, CisSection section) {
+    private static void encodeDenseSection(NetEncoderContext ctx, CisSection<BlockState> section) {
         ctx.bitWriter.write(CisConstants.SECTION_ENCODING_DENSE, 1);
 
         // Reset local palette structures
@@ -551,7 +573,7 @@ public final class CisNetworkEncoder {
         // Build local palette from unique states in this section
         // Use Reference2IntOpenHashMap for identity-based lookups (faster)
         for (int i = 0; i < SECTION_VOLUME; i++) {
-            BlockState state = section.denseBlocks[i];
+            BlockState state = (BlockState) section.denseBlocks[i];
             if (state != null && !state.isAir() && !ctx.fastLocalPaletteIndex.containsKey(state)) {
                 int globalIdx = ctx.globalIdMap.getInt(state);
                 if (globalIdx != -1) {
@@ -592,7 +614,7 @@ public final class CisNetworkEncoder {
         int bitsPerBlock = calculateBitsNeeded(localSize);
         if (bitsPerBlock > 0) {
             for (int i = 0; i < SECTION_VOLUME; i++) {
-                BlockState state = section.denseBlocks[i];
+                BlockState state = (BlockState) section.denseBlocks[i];
                 int localIdx = (state == null || state.isAir())
                         ? localAirIndex
                         : ctx.fastLocalPaletteIndex.getInt(state);

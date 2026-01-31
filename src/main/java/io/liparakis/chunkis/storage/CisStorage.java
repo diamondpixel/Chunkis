@@ -3,6 +3,7 @@ package io.liparakis.chunkis.storage;
 import io.liparakis.chunkis.core.ChunkDelta;
 import io.liparakis.chunkis.storage.codec.CisDecoder;
 import io.liparakis.chunkis.storage.codec.CisEncoder;
+import io.liparakis.chunkis.storage.adapter.MinecraftCisAdapter;
 import it.unimi.dsi.fastutil.objects.Object2ObjectLinkedOpenHashMap;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.WorldSavePath;
@@ -46,6 +47,7 @@ public final class CisStorage {
      * The global block mapping used for this storage instance.
      */
     private final CisMapping mapping;
+    private final MinecraftCisAdapter adapter;
 
     /**
      * LRU cache of open region files.
@@ -71,6 +73,7 @@ public final class CisStorage {
     public CisStorage(ServerWorld world) {
         this.storageDir = getOrCreateDimensionStorage(world);
         this.mapping = loadMapping(storageDir);
+        this.adapter = new MinecraftCisAdapter(this.mapping);
         this.regionCache = new Object2ObjectLinkedOpenHashMap<>(CisConstants.MAX_CACHED_REGIONS);
 
     }
@@ -89,13 +92,15 @@ public final class CisStorage {
         }
 
         try {
-            byte[] rawData = CisEncoder.encode(delta, mapping);
+            byte[] rawData = CisEncoder.encode(delta, adapter);
             mapping.flush();
 
             byte[] compressedData = compressionContext.get().compress(rawData);
 
-            RegionFile regionFile = getRegionFile(pos);
-            regionFile.write(pos, compressedData);
+            RegionFile regionFile = getRegionFile(pos, true);
+            if (regionFile != null) {
+                regionFile.write(pos, compressedData);
+            }
 
             delta.markSaved();
         } catch (IOException e) {
@@ -111,7 +116,10 @@ public final class CisStorage {
      */
     public ChunkDelta load(ChunkPos pos) {
         try {
-            RegionFile regionFile = getRegionFile(pos);
+            RegionFile regionFile = getRegionFile(pos, false);
+            if (regionFile == null) {
+                return new ChunkDelta();
+            }
             byte[] compressedData = regionFile.read(pos);
 
             if (compressedData == null) {
@@ -128,7 +136,7 @@ public final class CisStorage {
                 return new ChunkDelta();
             }
 
-            return new CisDecoder().decode(decompressed, mapping);
+            return new CisDecoder().decode(decompressed, adapter);
         } catch (IOException e) {
             io.liparakis.chunkis.ChunkisMod.LOGGER.error(
                     "Failed to decode CIS chunk at {} - clearing corrupted data. Error: {}",
@@ -171,7 +179,10 @@ public final class CisStorage {
      */
     private void clearChunk(ChunkPos pos) {
         try {
-            getRegionFile(pos).write(pos, null);
+            RegionFile regionFile = getRegionFile(pos, false);
+            if (regionFile != null) {
+                regionFile.write(pos, null);
+            }
         } catch (IOException e) {
             io.liparakis.chunkis.ChunkisMod.LOGGER.warn("Failed to clear chunk {}", pos, e);
         }
@@ -184,7 +195,7 @@ public final class CisStorage {
      * @return the region file handler
      * @throws IOException if the file cannot be opened
      */
-    private RegionFile getRegionFile(ChunkPos pos) throws IOException {
+    private RegionFile getRegionFile(ChunkPos pos, boolean create) throws IOException {
         RegionKey key = getRegionKey(pos);
 
         cacheLock.readLock().lock();
@@ -203,6 +214,13 @@ public final class CisStorage {
             RegionFile existing = regionCache.get(key);
             if (existing != null) {
                 return existing;
+            }
+
+            if (!create) {
+                Path regionPath = storageDir.resolve(String.format("r.%d.%d.cis", key.x, key.z));
+                if (!Files.exists(regionPath)) {
+                    return null;
+                }
             }
 
             if (regionCache.size() >= CisConstants.MAX_CACHED_REGIONS) {
@@ -517,7 +535,6 @@ public final class CisStorage {
         synchronized void compact() {
             try {
                 flush();
-                long initialSize = channel.size();
                 Path tempPath = path.resolveSibling(path.getFileName().toString() + ".tmp");
 
                 try (FileChannel dest = FileChannel.open(tempPath, StandardOpenOption.CREATE,
@@ -568,14 +585,6 @@ public final class CisStorage {
 
                 // Refresh header in memory
                 loadHeader();
-
-                long finalSize = channel.size();
-                if (finalSize < initialSize) {
-                    // io.liparakis.chunkis.ChunkisMod.LOGGER.info("Compacted {} ({} -> {} bytes)",
-                    // path.getFileName(),
-                    // initialSize, finalSize);
-                }
-
             } catch (IOException e) {
                 io.liparakis.chunkis.ChunkisMod.LOGGER.error("Failed to compact region {}", path, e);
                 // Try to reopen if we failed closed
