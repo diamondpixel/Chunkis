@@ -1,0 +1,31 @@
+<idea-plugin>
+    <id>io.liparakis.cisplugin</id>
+    <name>CIS File Debugger</name>
+    <version>1.0.0</version>
+    <vendor>Liparakis</vendor>
+
+    <description><![CDATA[
+    Viewer for Chunkis CIS (Chunk Information Storage) V7 files.
+    <br/><br/>
+    Opens .cis files and displays decoded chunk data including:
+    <ul>
+        <li>File header information</li>
+        <li>Global block palette</li>
+        <li>Section data (sparse/dense mode)</li>
+        <li>Block positions and palette indices</li>
+    </ul>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <fileType
+            name="CIS File"
+            implementationClass="io.liparakis.cisplugin.CisFileType"
+            fieldName="INSTANCE"
+            extensions="cis"/>
+
+        <fileEditorProvider
+            implementation="io.liparakis.cisplugin.CisFileEditorProvider"/>
+    </extensions>
+</idea-plugin>

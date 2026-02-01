@@ -1,0 +1,38 @@
+plugins {
+    id 'java'
+    id 'org.jetbrains.intellij' version '1.17.4'
+}
+
+group = 'io.liparakis.cisplugin'
+version = '1.0.0'
+
+repositories {
+    mavenCentral()
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+intellij {
+    version = '2024.1'
+    type = 'IC' // IntelliJ Community
+    plugins = []
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+tasks.named('patchPluginXml') {
+    sinceBuild = '241'
+    untilBuild = '253.*'
+}
+
+tasks.named('runIde') {
+    jvmArgs '-Xmx2g'
+}

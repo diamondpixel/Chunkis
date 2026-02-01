@@ -1,0 +1,69 @@
+plugins {
+    id 'fabric-loom' version '1.9-SNAPSHOT' apply false
+    id 'maven-publish'
+    id 'java' // Added as requested/verified in previous steps to help with IDE context, though less critical in Groovy
+}
+
+subprojects { subproject ->
+    // Exclude cis-debugger from Fabric/Minecraft configuration
+    if (subproject.name == 'cis-debugger') {
+        return
+    }
+
+    apply plugin: 'java-library'
+    apply plugin: 'fabric-loom'
+    apply plugin: 'maven-publish'
+
+    // Properties are dynamically resolved in Groovy
+    def minecraft_version = project.property('minecraft_version')
+    def yarn_mappings = project.property('yarn_mappings')
+    def mod_version = project.property('mod_version')
+    def maven_group = project.property('maven_group')
+    def archives_base_name = project.property('archives_base_name')
+    def loader_version = project.property('loader_version')
+
+    version = mod_version
+    group = maven_group
+
+    base {
+        archivesName = "${archives_base_name}-${project.name}"
+    }
+
+    repositories {
+        mavenCentral()
+        maven {
+            name = 'Fabric'
+            url = 'https://maven.fabricmc.net/'
+        }
+    }
+
+    dependencies {
+        minecraft "com.mojang:minecraft:${minecraft_version}"
+        mappings "net.fabricmc:yarn:${yarn_mappings}:v2"
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        options.release = 21
+    }
+
+    java {
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(21)
+        }
+        withSourcesJar()
+    }
+
+    tasks.withType(ProcessResources).configureEach {
+        inputs.property "version", project.version
+        inputs.property "minecraft_version", minecraft_version
+        inputs.property "loader_version", loader_version
+        filteringCharset = "UTF-8"
+
+        filesMatching("fabric.mod.json") {
+            expand "version": project.version,
+                   "minecraft_version": minecraft_version,
+                   "loader_version": loader_version
+        }
+    }
+}
+
