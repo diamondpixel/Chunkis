@@ -1,4 +1,4 @@
-package io.liparakis.chunkis.core;
+package io.liparakis.chunkis.util;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
@@ -14,28 +14,31 @@ import net.minecraft.world.chunk.ProtoChunk;
  * systems, or comparing current state against original state.
  * </p>
  * <p>
- * The snapshot is created once from a {@link ProtoChunk} during chunk generation
+ * The snapshot is created once from a {@link ProtoChunk} during chunk
+ * generation
  * and remains immutable throughout its lifetime. This ensures:
  * <ul>
- *   <li>Thread-safe read access without synchronization</li>
- *   <li>Consistent reference point for the chunk's original state</li>
- *   <li>No risk of the snapshot being corrupted by subsequent modifications</li>
+ * <li>Thread-safe read access without synchronization</li>
+ * <li>Consistent reference point for the chunk's original state</li>
+ * <li>No risk of the snapshot being corrupted by subsequent modifications</li>
  * </ul>
  * </p>
  * <p>
  * Memory optimization:
  * <ul>
- *   <li>Empty sections (all air) are stored as {@code null} to save memory</li>
- *   <li>Each non-empty section uses a flat array of 4096 BlockStates (16×16×16)</li>
- *   <li>Block states are stored using bit-packed indexing for cache efficiency</li>
+ * <li>Empty sections (all air) are stored as {@code null} to save memory</li>
+ * <li>Each non-empty section uses a flat array of 4096 BlockStates
+ * (16×16×16)</li>
+ * <li>Block states are stored using bit-packed indexing for cache
+ * efficiency</li>
  * </ul>
  * </p>
  * <p>
  * Performance characteristics:
  * <ul>
- *   <li>Construction: O(n) where n is the number of blocks in the chunk</li>
- *   <li>Lookup: O(1) constant time access to any block</li>
- *   <li>Memory: ~256KB per full chunk (16 sections × 4096 states × 4 bytes)</li>
+ * <li>Construction: O(n) where n is the number of blocks in the chunk</li>
+ * <li>Lookup: O(1) constant time access to any block</li>
+ * <li>Memory: ~256KB per full chunk (16 sections × 4096 states × 4 bytes)</li>
  * </ul>
  * </p>
  *
@@ -60,7 +63,8 @@ public final class VanillaChunkSnapshot {
     /**
      * Creates an immutable snapshot of the vanilla block states from a ProtoChunk.
      * <p>
-     * This constructor performs a deep copy of all block states from the proto chunk,
+     * This constructor performs a deep copy of all block states from the proto
+     * chunk,
      * capturing the world-generated state before any player modifications. Empty
      * sections (containing only air) are not stored to conserve memory.
      * </p>
@@ -80,7 +84,8 @@ public final class VanillaChunkSnapshot {
 
         for (int i = 0; i < sections.length; i++) {
             ChunkSection section = sections[i];
-            if (section == null || section.isEmpty()) continue;
+            if (section == null || section.isEmpty())
+                continue;
 
             BlockState[] states = new BlockState[4096];
             for (int y = 0; y < 16; y++) {
@@ -106,10 +111,11 @@ public final class VanillaChunkSnapshot {
      * <p>
      * The lookup process:
      * <ol>
-     *   <li>Convert world Y to section index using {@code (worldY >> 4) - minSectionY}</li>
-     *   <li>Check if section exists and is non-empty</li>
-     *   <li>Calculate within-section index using bit-packing</li>
-     *   <li>Return the cached block state</li>
+     * <li>Convert world Y to section index using
+     * {@code (worldY >> 4) - minSectionY}</li>
+     * <li>Check if section exists and is non-empty</li>
+     * <li>Calculate within-section index using bit-packing</li>
+     * <li>Return the cached block state</li>
      * </ol>
      * </p>
      *

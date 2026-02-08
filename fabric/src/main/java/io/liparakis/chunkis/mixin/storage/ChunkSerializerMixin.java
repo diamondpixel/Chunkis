@@ -2,6 +2,7 @@ package io.liparakis.chunkis.mixin.storage;
 
 import io.liparakis.chunkis.api.ChunkisDeltaDuck;
 import io.liparakis.chunkis.core.ChunkDelta;
+import io.liparakis.chunkis.util.CisNbtUtil;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.ChunkPos;
@@ -34,18 +35,6 @@ public class ChunkSerializerMixin {
      */
     @Unique
     private static final int MAX_INSTRUCTION_THRESHOLD = 1000;
-
-    /**
-     * The NBT key used to store Chunkis-specific delta data.
-     */
-    @Unique
-    private static final String CHUNKIS_DATA_KEY = "ChunkisData";
-
-    /**
-     * The status string used to represent an empty chunk status in NBT.
-     */
-    @Unique
-    private static final String STATUS_EMPTY = "minecraft:empty";
 
     /**
      * Injects into the beginning of the serialize method to handle Chunkis-specific
@@ -81,10 +70,8 @@ public class ChunkSerializerMixin {
 
         NbtCompound nbt = chunkis$createMinimalNbt(world, chunk);
 
-        // Write our custom delta data
-        NbtCompound chunkisData = new NbtCompound();
-        delta.writeNbt(chunkisData);
-        nbt.put(CHUNKIS_DATA_KEY, chunkisData);
+        // Write our custom delta data using centralized helper
+        CisNbtUtil.putDelta(nbt, delta);
 
         cir.setReturnValue(nbt);
         delta.markSaved();
@@ -104,14 +91,11 @@ public class ChunkSerializerMixin {
      */
     @Unique
     private static NbtCompound chunkis$createMinimalNbt(ServerWorld world, Chunk chunk) {
-        NbtCompound nbt = new NbtCompound();
         ChunkPos pos = chunk.getPos();
+        int dataVersion = net.minecraft.SharedConstants.getGameVersion().getSaveVersion().getId();
 
-        nbt.putInt("DataVersion", net.minecraft.SharedConstants.getGameVersion().getSaveVersion().getId());
-        nbt.putInt("xPos", pos.x);
-        nbt.putInt("zPos", pos.z);
-        nbt.putLong("LastUpdate", world.getTime());
-        nbt.putString("Status", STATUS_EMPTY);
+        NbtCompound nbt = CisNbtUtil.createBaseNbt(pos, dataVersion);
+        nbt.putLong(CisNbtUtil.LAST_UPDATE_KEY, world.getTime());
 
         return nbt;
     }
@@ -135,17 +119,24 @@ public class ChunkSerializerMixin {
     @Inject(method = "deserialize", at = @At("RETURN"))
     private static void chunkis$onDeserialize(ServerWorld world, PointOfInterestStorage poiStorage, StorageKey key,
             ChunkPos pos, NbtCompound nbt, CallbackInfoReturnable<ProtoChunk> cir) {
-        if (!nbt.contains(CHUNKIS_DATA_KEY)) {
+        if (!nbt.contains(io.liparakis.chunkis.util.CisNbtUtil.CHUNKIS_DATA_KEY)) {
             return;
         }
         ProtoChunk chunk = cir.getReturnValue();
-        if (!(chunk instanceof ChunkisDeltaDuck duck)) {
-            return;
-        }
-        ChunkDelta delta = duck.chunkis$getDelta();
-        NbtCompound data = nbt.getCompound(CHUNKIS_DATA_KEY);
-        delta.readNbt(data);
 
+        // 1. Get storage
+        var storage = io.liparakis.chunkis.util.FabricCisStorageHelper.getStorage(world);
+
+        // 2. Load delta
+        io.liparakis.chunkis.core.CisChunkPos cisPos = new io.liparakis.chunkis.core.CisChunkPos(pos.x, pos.z);
+        ChunkDelta delta = (ChunkDelta) storage.load(cisPos);
+
+        // 3. Attach to ProtoChunk so WorldChunkMixin can find it later
+        if (chunk instanceof ChunkisDeltaDuck duck) {
+            duck.chunkis$setDelta(delta);
+        }
+
+        // 4. Force status to EMPTY to trigger generation/restoration pipeline
         chunk.setStatus(ChunkStatus.EMPTY);
     }
 }

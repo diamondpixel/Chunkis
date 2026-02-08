@@ -1,17 +1,20 @@
-package io.liparakis.chunkis.storage.adapter;
+package io.liparakis.chunkis.adapter;
 
 import io.liparakis.chunkis.storage.BitUtils;
 import io.liparakis.chunkis.storage.CisAdapter;
 import io.liparakis.chunkis.storage.CisMapping;
+import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
+import net.minecraft.state.property.Property;
 
 import java.io.IOException;
 
 /**
  * Minecraft-specific implementation of the CIS adapter.
- * Delegates to CisMapping for blocked ID management and property serialization.
+ * Delegates to CisMapping for block ID management and property serialization.
  */
-public record MinecraftCisAdapter(CisMapping mapping) implements CisAdapter<BlockState> {
+public record MinecraftCisAdapter(CisMapping<Block, BlockState, Property<?>> mapping)
+        implements CisAdapter<BlockState> {
 
     @Override
     public int getBlockId(BlockState state) {

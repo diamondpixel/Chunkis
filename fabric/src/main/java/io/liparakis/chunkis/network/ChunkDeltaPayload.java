@@ -37,7 +37,7 @@ import net.minecraft.util.Identifier;
  * @param chunkX The X coordinate of the chunk in chunk-space
  * @param chunkZ The Z coordinate of the chunk in chunk-space
  *
- * @author Performance optimization
+ * @author Liparakis
  * @version 1.1
  */
 public record ChunkDeltaPayload(byte[] data, int chunkX, int chunkZ) implements CustomPayload {

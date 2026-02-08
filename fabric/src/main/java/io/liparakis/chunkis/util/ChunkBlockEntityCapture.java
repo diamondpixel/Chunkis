@@ -1,6 +1,7 @@
 package io.liparakis.chunkis.util;
 
 import io.liparakis.chunkis.core.ChunkDelta;
+import io.liparakis.chunkis.storage.CisConstants;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.util.math.BlockPos;
@@ -17,6 +18,10 @@ import net.minecraft.world.chunk.WorldChunk;
  */
 public final class ChunkBlockEntityCapture {
 
+    private ChunkBlockEntityCapture() {
+        // Utility class
+    }
+
     /**
      * Captures all block entities in the chunk and stores them in the delta.
      * <p>
@@ -28,7 +33,7 @@ public final class ChunkBlockEntityCapture {
      * @param chunk The chunk being saved
      * @param delta The delta to store block entity data
      */
-    public void captureAll(WorldChunk chunk, ChunkDelta delta) {
+    public static void captureAll(WorldChunk chunk, ChunkDelta delta) {
         var blockEntities = chunk.getBlockEntities();
         if (blockEntities.isEmpty()) {
             return; // Early exit for chunks with no block entities
@@ -50,9 +55,9 @@ public final class ChunkBlockEntityCapture {
 
             // Convert world coordinates to local chunk coordinates
             BlockPos worldPos = blockEntity.getPos();
-            int localX = worldPos.getX() & 15; // Equivalent to % 16, but faster
+            int localX = worldPos.getX() & CisConstants.COORD_MASK;
             int localY = worldPos.getY();
-            int localZ = worldPos.getZ() & 15;
+            int localZ = worldPos.getZ() & CisConstants.COORD_MASK;
 
             delta.addBlockEntityData(localX, localY, localZ, nbt);
         }

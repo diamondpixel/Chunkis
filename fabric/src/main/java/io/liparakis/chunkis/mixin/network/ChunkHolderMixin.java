@@ -41,7 +41,7 @@ import java.util.List;
  * checking</li>
  * </ul>
  *
- * @author Performance optimization
+ * @author Liparakis
  * @version 1.1
  * @see ChunkHolder
  * @see ChunkisNetworking#sendDelta(ServerPlayerEntity, WorldChunk)

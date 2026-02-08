@@ -18,15 +18,15 @@ import java.util.List;
  * Handles entity capture for chunk saving in CIS format.
  * <p>
  * Performance optimizations:
- * - Reuses entity list to avoid allocation per chunk
  * - Uses chunk coordinate math instead of entity.getChunkPos()
  * - Batches entity queries on server thread
  * - Skips redundant checks early
  */
 public final class ChunkEntityCapture {
 
-    // Reused collection to minimize allocations during chunk saves
-    private final List<NbtCompound> capturedEntities = new ArrayList<>(16);
+    private ChunkEntityCapture() {
+        // Utility class
+    }
 
     /**
      * Captures all entities in the chunk and stores them in the delta.
@@ -36,9 +36,7 @@ public final class ChunkEntityCapture {
      * @param delta The delta to store entity data
      * @param world The server world for entity queries
      */
-    public void captureAll(WorldChunk chunk, ChunkDelta delta, ServerWorld world) {
-        capturedEntities.clear();
-
+    public static void captureAll(WorldChunk chunk, ChunkDelta delta, ServerWorld world) {
         ChunkPos chunkPos = chunk.getPos();
         List<Entity> entities = getEntitiesInChunk(chunk, world);
 
@@ -47,7 +45,9 @@ public final class ChunkEntityCapture {
                     chunkPos, entities.size());
         }
 
+        List<NbtCompound> capturedEntities = new ArrayList<>(Math.min(entities.size(), 16));
         int capturedCount = 0;
+
         for (Entity entity : entities) {
             if (shouldCaptureEntity(entity, chunkPos)) {
                 NbtCompound nbt = new NbtCompound();
@@ -58,7 +58,7 @@ public final class ChunkEntityCapture {
             }
         }
 
-        delta.setEntities(new ArrayList<>(capturedEntities)); // Defensive copy
+        delta.setEntities(capturedEntities);
 
         if (Chunkis.LOGGER.isDebugEnabled()) {
             Chunkis.LOGGER.debug("Entity capture complete for chunk {}: {} entities, dirty: {}",
@@ -70,7 +70,7 @@ public final class ChunkEntityCapture {
      * Queries all entities within the chunk bounds.
      * Must execute on server thread.
      */
-    private List<Entity> getEntitiesInChunk(WorldChunk chunk, ServerWorld world) {
+    private static List<Entity> getEntitiesInChunk(WorldChunk chunk, ServerWorld world) {
         ChunkPos pos = chunk.getPos();
         Box chunkBox = new Box(
                 pos.getStartX(),
@@ -97,7 +97,7 @@ public final class ChunkEntityCapture {
      * @param chunkPos Position of the chunk being saved
      * @return true if entity should be captured
      */
-    private boolean shouldCaptureEntity(Entity entity, ChunkPos chunkPos) {
+    private static boolean shouldCaptureEntity(Entity entity, ChunkPos chunkPos) {
         // Rule 1: Players are managed separately by Minecraft
         if (entity instanceof PlayerEntity) {
             return false;
