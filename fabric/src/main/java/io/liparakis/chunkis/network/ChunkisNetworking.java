@@ -4,6 +4,7 @@ import io.liparakis.chunkis.Chunkis;
 import io.liparakis.chunkis.api.ChunkisDeltaDuck;
 import io.liparakis.chunkis.core.ChunkDelta;
 import io.liparakis.chunkis.storage.codec.CisNetworkEncoder;
+import io.liparakis.chunkis.util.FabricNetworkCodecFactory;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.ChunkPos;
@@ -32,7 +33,7 @@ import net.minecraft.world.chunk.WorldChunk;
  * All Minecraft networking operations must occur on the server thread.
  * </p>
  *
- * @author Performance optimization
+ * @author Liparakis
  * @version 1.1
  * @see ChunkDelta
  * @see ChunkDeltaPayload
@@ -121,7 +122,7 @@ public final class ChunkisNetworking {
         try {
             // Encode the delta - this is the primary performance bottleneck
             // Typical encoding time: 5-50μs depending on delta size
-            byte[] data = CisNetworkEncoder.encode(delta);
+            byte[] data = FabricNetworkCodecFactory.createEncoder().encode(delta);
 
             // Send payload using primitives directly - avoids ChunkPos object in payload
             // Using pos.x and pos.z directly prevents unnecessary object retention

@@ -1,11 +1,14 @@
 package io.liparakis.chunkis;
 
 import io.liparakis.chunkis.api.ChunkisDeltaDuck;
-import io.liparakis.chunkis.core.BlockInstruction;
 import io.liparakis.chunkis.core.ChunkDelta;
 import io.liparakis.chunkis.network.ChunkDeltaPayload;
 import io.liparakis.chunkis.storage.codec.CisNetworkDecoder;
-import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
+import io.liparakis.chunkis.util.FabricNetworkCodecFactory;
+import net.minecraft.block.Block;
+import net.minecraft.state.property.Property;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -16,10 +19,6 @@ import net.minecraft.nbt.NbtCompound;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.chunk.WorldChunk;
 
-import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
-
 /**
  * Client-side initialization and packet handling for the Chunkis mod.
  */
@@ -27,7 +26,8 @@ import java.util.concurrent.atomic.AtomicLong;
 public class ClientChunkisMod implements ClientModInitializer {
 
     // Thread-local decoder with pre-allocated buffers
-    private static final ThreadLocal<CisNetworkDecoder> DECODER = ThreadLocal.withInitial(CisNetworkDecoder::new);
+    private static final ThreadLocal<CisNetworkDecoder<Block, BlockState, Property<?>, NbtCompound>> DECODER = ThreadLocal
+            .withInitial(FabricNetworkCodecFactory::createDecoder);
 
     // Thread-local mutable BlockPos to eliminate allocations in hot path
     private static final ThreadLocal<BlockPos.Mutable> MUTABLE_POS = ThreadLocal.withInitial(BlockPos.Mutable::new);
@@ -42,9 +42,6 @@ public class ClientChunkisMod implements ClientModInitializer {
     // Error rate limiting
     private static final AtomicInteger errorCount = new AtomicInteger(0);
     private static final int ERROR_LOG_INTERVAL = 100;
-
-    // Batch size for rendering updates - tune based on typical delta size
-    private static final int RENDER_BATCH_THRESHOLD = 50;
 
     @Override
     public void onInitializeClient() {
@@ -108,21 +105,15 @@ public class ClientChunkisMod implements ClientModInitializer {
             // Get client delta tracker
             ChunkDelta clientDelta = deltaDuck.chunkis$getDelta();
 
-            // Get block instructions list once
-            List<BlockInstruction> blockInstructions = receivedDelta.getBlockInstructions();
-            int instructionCount = blockInstructions.size();
-
-            // Apply delta
-            applyDelta(clientDelta, receivedDelta, world, chunkX, chunkZ, instructionCount);
-
-            // Rendering schedule
-            scheduleBlockRerendering(world, chunkX, chunkZ, blockInstructions);
+            // Apply delta using visitor
+            applyDelta(clientDelta, receivedDelta, world, chunkX, chunkZ);
 
             // Metrics tracking (minimal overhead when enabled)
             if (ENABLE_METRICS) {
                 long elapsed = System.nanoTime() - startTime;
                 totalDecodeTimeNanos.addAndGet(elapsed);
-                totalBlocksChanged.addAndGet(instructionCount);
+                // totalBlocksChanged.addAndGet(instructionCount); // Metrics update needs
+                // visitor tracking (omitted for now)
 
                 // Log every 1000 packets
                 if ((packetsReceived.get() & 0x3FF) == 0) { // Bit mask instead of modulo
@@ -133,9 +124,8 @@ public class ClientChunkisMod implements ClientModInitializer {
             // Debug logging - only if debug level is enabled (check is in logger)
             if (Chunkis.LOGGER.isDebugEnabled()) {
                 Chunkis.LOGGER.debug(
-                        "Applied ChunkDelta ({}, {}) - {} bytes, {} blocks, {} entities",
-                        chunkX, chunkZ, data.length, instructionCount,
-                        receivedDelta.getBlockEntities().size());
+                        "Applied ChunkDelta ({}, {}) - {} bytes",
+                        chunkX, chunkZ, data.length);
             }
 
         } catch (Exception e) {
@@ -145,120 +135,56 @@ public class ClientChunkisMod implements ClientModInitializer {
     }
 
     /**
-     * Delta application with minimal allocations and cached positions
+     * Delta application with minimal allocations using Visitor pattern
      */
     private static void applyDelta(
             ChunkDelta clientDelta,
             ChunkDelta receivedDelta,
             ClientWorld world,
             int chunkX,
-            int chunkZ,
-            int instructionCount) {
+            int chunkZ) {
 
-        // Cache chunk base coordinates (avoid repeated bit shifts)
-        final int baseX = chunkX << 4;
-        final int baseZ = chunkZ << 4;
+        receivedDelta.accept(new ClientDeltaVisitor(clientDelta, world, chunkX, chunkZ));
+    }
 
-        // Get block palette once
-        var palette = receivedDelta.getBlockPalette();
+    private static class ClientDeltaVisitor implements ChunkDelta.DeltaVisitor<BlockState, NbtCompound> {
+        private final ChunkDelta clientDelta;
+        private final ClientWorld world;
+        private final int baseX;
+        private final int baseZ;
+        private final BlockPos.Mutable mutablePos;
 
-        // Get thread-local mutable position (eliminates allocations!)
-        BlockPos.Mutable mutablePos = MUTABLE_POS.get();
+        ClientDeltaVisitor(ChunkDelta clientDelta, ClientWorld world, int chunkX, int chunkZ) {
+            this.clientDelta = clientDelta;
+            this.world = world;
+            this.baseX = chunkX << 4;
+            this.baseZ = chunkZ << 4;
+            this.mutablePos = MUTABLE_POS.get();
+        }
 
-        // Get block instructions
-        List<BlockInstruction> instructions = receivedDelta.getBlockInstructions();
-
-        // OPTIMIZED HOT PATH: Process all block changes with minimal overhead
-        for (int i = 0; i < instructionCount; i++) {
-            BlockInstruction instruction = instructions.get(i);
-
-            // Get state from palette (will be null if invalid index)
-            BlockState state = palette.get(instruction.paletteIndex());
-            if (state == null)
-                continue;
-
-            // Extract coordinates (these are already unpacked in BlockInstruction)
-            int localX = instruction.x();
-            int localY = instruction.y();
-            int localZ = instruction.z();
-
-            // Calculate world position using mutable BlockPos (NO allocation!)
-            mutablePos.set(baseX + localX, localY, baseZ + localZ);
+        @Override
+        public void visitBlock(int x, int y, int z, BlockState state) {
+            // Calculate world position
+            mutablePos.set(baseX + x, y, baseZ + z);
 
             // Apply to world (flag 2 = UPDATE_CLIENTS, skip packet send)
             world.setBlockState(mutablePos, state, 2);
 
-            // Track in client delta (markDirty = false)
-            clientDelta.addBlockChange(localX, localY, localZ, state, false);
+            // Track in client delta
+            clientDelta.addBlockChange(x, y, z, state, false);
+
+            // Schedule render update
+            world.scheduleBlockRenders(baseX + x, y, baseZ + z);
         }
 
-        // Apply block entities if any exist
-        Long2ObjectMap<NbtCompound> blockEntities = receivedDelta.getBlockEntities();
-        if (!blockEntities.isEmpty()) {
-            applyBlockEntities(clientDelta, blockEntities);
-        }
-
-        // Apply entities if present
-        List<NbtCompound> entities = receivedDelta.getEntitiesList();
-        if (entities != null && !entities.isEmpty()) {
-            clientDelta.setEntities(entities, false);
-        }
-    }
-
-    /**
-     * Separate block entity processing to keep hot path lean
-     */
-    private static void applyBlockEntities(ChunkDelta clientDelta, Long2ObjectMap<NbtCompound> blockEntities) {
-        // Use fastutil's optimized iterator
-        for (Long2ObjectMap.Entry<NbtCompound> entry : blockEntities.long2ObjectEntrySet()) {
-            long posKey = entry.getLongKey();
-            NbtCompound nbt = entry.getValue();
-
-            // Unpack coordinates
-            int x = BlockInstruction.unpackX(posKey);
-            int y = BlockInstruction.unpackY(posKey);
-            int z = BlockInstruction.unpackZ(posKey);
-
-            // Add to client delta
+        @Override
+        public void visitBlockEntity(int x, int y, int z, NbtCompound nbt) {
             clientDelta.addBlockEntityData(x, y, z, nbt, false);
         }
-    }
 
-    /**
-     * Block re-rendering with batching for large deltas
-     */
-    private static void scheduleBlockRerendering(
-            ClientWorld world,
-            int chunkX,
-            int chunkZ,
-            List<BlockInstruction> instructions) {
-
-        int count = instructions.size();
-        if (count == 0)
-            return;
-
-        // Cache base coordinates
-        final int baseX = chunkX << 4;
-        final int baseZ = chunkZ << 4;
-
-        // For small deltas, use direct method (fastest for <50 blocks)
-        if (count < RENDER_BATCH_THRESHOLD) {
-            for (BlockInstruction instr : instructions) {
-                world.scheduleBlockRenders(
-                        baseX + instr.x(),
-                        instr.y(),
-                        baseZ + instr.z());
-            }
-        } else {
-            // For large deltas, still iterate but use array access pattern for better cache
-            // locality
-            BlockInstruction[] instrArray = instructions.toArray(new BlockInstruction[0]);
-            for (BlockInstruction instr : instrArray) {
-                world.scheduleBlockRenders(
-                        baseX + instr.x(),
-                        instr.y(),
-                        baseZ + instr.z());
-            }
+        @Override
+        public void visitEntity(NbtCompound nbt) {
+            clientDelta.getEntitiesList().add(nbt);
         }
     }
 

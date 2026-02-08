@@ -10,7 +10,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-import io.liparakis.chunkis.core.LeafTickContext;
+import io.liparakis.chunkis.util.LeafTickContext;
 
 /**
  * Mixin for {@link LeavesBlock} to track when leaf decay or updates are

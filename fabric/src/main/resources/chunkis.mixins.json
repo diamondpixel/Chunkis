@@ -3,10 +3,9 @@
   "package": "io.liparakis.chunkis.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "world.ChunkMixin",
+    "world.CommonChunkMixin",
     "storage.ChunkSerializerMixin",
     "world.LeavesBlockMixin",
-    "world.ProtoChunkMixin",
     "storage.StoragePreventionMixin",
     "storage.ThreadedAnvilChunkStorageMixin",
     "world.WorldChunkMixin",
