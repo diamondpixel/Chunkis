@@ -52,7 +52,7 @@ public class WorldChunkMixin {
      */
     @Unique
     private ChunkDelta chunkis$getDelta() {
-        return ((ChunkisDeltaDuck) (Object) this).chunkis$getDelta();
+        return ((ChunkisDeltaDuck) this).chunkis$getDelta();
     }
 
     /**
