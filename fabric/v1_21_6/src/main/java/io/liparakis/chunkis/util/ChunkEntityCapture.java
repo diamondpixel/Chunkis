@@ -1,0 +1,132 @@
+package io.liparakis.chunkis.util;
+
+import io.liparakis.chunkis.Chunkis;
+import io.liparakis.chunkis.core.ChunkDelta;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.nbt.NbtCompound;
+import net.minecraft.server.world.ServerWorld;
+import net.minecraft.storage.NbtWriteView;
+import net.minecraft.util.ErrorReporter;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.ChunkPos;
+import net.minecraft.util.math.MathHelper;
+import net.minecraft.world.chunk.WorldChunk;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Handles entity capture for chunk saving in CIS format.
+ * <p>
+ * Performance optimizations:
+ * - Uses chunk coordinate math instead of entity.getChunkPos()
+ * - Batches entity queries on server thread
+ * - Skips redundant checks early
+ */
+public final class ChunkEntityCapture {
+
+    private ChunkEntityCapture() {
+        // Utility class
+    }
+
+    /**
+     * Captures all entities in the chunk and stores them in the delta.
+     * Must be called on server thread.
+     *
+     * @param chunk The chunk being saved
+     * @param delta The delta to store entity data
+     * @param world The server world for entity queries
+     */
+    public static void captureAll(WorldChunk chunk, ChunkDelta delta, ServerWorld world) {
+        ChunkPos chunkPos = chunk.getPos();
+        List<Entity> entities = getEntitiesInChunk(chunk, world);
+
+        if (Chunkis.LOGGER.isDebugEnabled()) {
+            Chunkis.LOGGER.debug("Capturing entities for chunk {}, candidates: {}",
+                    chunkPos, entities.size());
+        }
+
+        List<NbtCompound> capturedEntities = new ArrayList<>(Math.min(entities.size(), 16));
+        int capturedCount = 0;
+
+        for (Entity entity : entities) {
+            if (shouldCaptureEntity(entity, chunkPos)) {
+                // 1.21.6: Use NbtWriteView to serialize entity data
+                NbtWriteView writeView = NbtWriteView.create(
+                        ErrorReporter.EMPTY
+                );
+                entity.saveData(writeView);
+                NbtCompound nbt = writeView.getNbt();
+                if (!nbt.isEmpty()) {
+                    capturedEntities.add(nbt);
+                    capturedCount++;
+                }
+            }
+        }
+
+        delta.setEntities(capturedEntities);
+
+        if (Chunkis.LOGGER.isDebugEnabled()) {
+            Chunkis.LOGGER.debug("Entity capture complete for chunk {}: {} entities, dirty: {}",
+                    chunkPos, capturedCount, delta.isDirty());
+        }
+    }
+
+    /**
+     * Queries all entities within the chunk bounds.
+     * Must execute on server thread.
+     */
+    private static List<Entity> getEntitiesInChunk(WorldChunk chunk, ServerWorld world) {
+        ChunkPos pos = chunk.getPos();
+        Box chunkBox = new Box(
+                pos.getStartX(),
+                world.getBottomY(),
+                pos.getStartZ(),
+                pos.getEndX() + 1.0,
+                world.getHeight(),  // Max world height
+                pos.getEndZ() + 1.0);
+
+        // Server thread query - safe as mixin executes on server thread
+        return world.getEntitiesByClass(Entity.class, chunkBox, entity -> true);
+    }
+
+    /**
+     * Determines if an entity should be captured for this chunk.
+     * <p>
+     * Filtering rules:
+     * 1. Skip players (managed separately)
+     * 2. Skip removed entities
+     * 3. Skip passengers (saved with their vehicle)
+     * 4. Skip entities not physically in this chunk (prevent duplication)
+     *
+     * @param entity   Entity to check
+     * @param chunkPos Position of the chunk being saved
+     * @return true if entity should be captured
+     */
+    private static boolean shouldCaptureEntity(Entity entity, ChunkPos chunkPos) {
+        // Rule 1: Players are managed separately by Minecraft
+        if (entity instanceof PlayerEntity) {
+            return false;
+        }
+
+        // Rule 2: Don't save removed/dead entities
+        if (entity.isRemoved()) {
+            return false;
+        }
+
+        // Rule 3: Passengers are saved with their vehicle
+        // This prevents duplication when vehicle+passenger cross chunk boundaries
+        if (entity.hasVehicle()) {
+            return false;
+        }
+
+        // Rule 4: Exact chunk coordinate check
+        // Use floor division to convert world coords to chunk coords
+        // This is more reliable than entity.getChunkPos() which may be stale
+        int entityChunkX = MathHelper.floor(entity.getX()) >> 4;
+        int entityChunkZ = MathHelper.floor(entity.getZ()) >> 4;
+
+        return entityChunkX == chunkPos.x && entityChunkZ == chunkPos.z;
+    }
+}
