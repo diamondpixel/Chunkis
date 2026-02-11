@@ -20,7 +20,11 @@ import java.util.List;
  * Performance optimizations:
  * - Uses chunk coordinate math instead of entity.getChunkPos()
  * - Batches entity queries on server thread
+ * - Filters entities during world query to reduce iteration overhead
  * - Skips redundant checks early
+ *
+ * @author Liparakis
+ * @version 1.0
  */
 public final class ChunkEntityCapture {
 
@@ -38,56 +42,55 @@ public final class ChunkEntityCapture {
      */
     public static void captureAll(WorldChunk chunk, ChunkDelta delta, ServerWorld world) {
         ChunkPos chunkPos = chunk.getPos();
-        List<Entity> entities = getEntitiesInChunk(chunk, world);
 
         if (Chunkis.LOGGER.isDebugEnabled()) {
-            Chunkis.LOGGER.debug("Capturing entities for chunk {}, candidates: {}",
-                    chunkPos, entities.size());
+            Chunkis.LOGGER.debug("Starting entity capture for chunk {}", chunkPos);
         }
 
+        // Get and filter entities in a single pass
+        List<Entity> entities = getEntitiesInChunk(world, chunkPos);
+
+        // Pre-size list based on filtered results, capped at reasonable maximum
         List<NbtCompound> capturedEntities = new ArrayList<>(Math.min(entities.size(), 16));
-        int capturedCount = 0;
 
         for (Entity entity : entities) {
-            if (shouldCaptureEntity(entity, chunkPos)) {
-                NbtCompound nbt = new NbtCompound();
-                if (entity.saveNbt(nbt)) {
-                    capturedEntities.add(nbt);
-                    capturedCount++;
-                }
+            NbtCompound nbt = new NbtCompound();
+            if (entity.saveNbt(nbt)) {
+                capturedEntities.add(nbt);
             }
         }
 
         delta.setEntities(capturedEntities);
 
         if (Chunkis.LOGGER.isDebugEnabled()) {
-            Chunkis.LOGGER.debug("Entity capture complete for chunk {}: {} entities, dirty: {}",
-                    chunkPos, capturedCount, delta.isDirty());
+            Chunkis.LOGGER.debug("Entity capture complete for chunk {}: {} entities captured, dirty: {}",
+                    chunkPos, capturedEntities.size(), delta.isDirty());
         }
     }
 
     /**
-     * Queries all entities within the chunk bounds.
+     * Queries all capturable entities within the chunk bounds.
+     * Applies filtering during the query for better performance.
      * Must execute on server thread.
      */
-    private static List<Entity> getEntitiesInChunk(WorldChunk chunk, ServerWorld world) {
-        ChunkPos pos = chunk.getPos();
+    private static List<Entity> getEntitiesInChunk(ServerWorld world, ChunkPos chunkPos) {
         Box chunkBox = new Box(
-                pos.getStartX(),
+                chunkPos.getStartX(),
                 world.getBottomY(),
-                pos.getStartZ(),
-                pos.getEndX() + 1.0,
-                world.getTopY(),
-                pos.getEndZ() + 1.0);
+                chunkPos.getStartZ(),
+                chunkPos.getEndX() + 1.0,
+                world.getBottomY() + world.getHeight(),
+                chunkPos.getEndZ() + 1.0);
 
-        // Server thread query - safe as mixin executes on server thread
-        return world.getEntitiesByClass(Entity.class, chunkBox, entity -> true);
+        // Filter during query to avoid second iteration
+        return world.getEntitiesByClass(Entity.class, chunkBox,
+                entity -> shouldCaptureEntity(entity, chunkPos));
     }
 
     /**
      * Determines if an entity should be captured for this chunk.
      * <p>
-     * Filtering rules:
+     * Filtering rules (applied in order of cheapest checks first):
      * 1. Skip players (managed separately)
      * 2. Skip removed entities
      * 3. Skip passengers (saved with their vehicle)
@@ -99,11 +102,13 @@ public final class ChunkEntityCapture {
      */
     private static boolean shouldCaptureEntity(Entity entity, ChunkPos chunkPos) {
         // Rule 1: Players are managed separately by Minecraft
+        // Cheapest check - instance check
         if (entity instanceof PlayerEntity) {
             return false;
         }
 
         // Rule 2: Don't save removed/dead entities
+        // Fast state check
         if (entity.isRemoved()) {
             return false;
         }
@@ -115,7 +120,7 @@ public final class ChunkEntityCapture {
         }
 
         // Rule 4: Exact chunk coordinate check
-        // Use floor division to convert world coords to chunk coords
+        // Use bit shift for fast floor division: (int)(x / 16) == (int)x >> 4
         // This is more reliable than entity.getChunkPos() which may be stale
         int entityChunkX = MathHelper.floor(entity.getX()) >> 4;
         int entityChunkZ = MathHelper.floor(entity.getZ()) >> 4;

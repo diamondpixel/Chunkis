@@ -42,7 +42,7 @@ import java.util.List;
  * </ul>
  *
  * @author Liparakis
- * @version 1.1
+ * @version 1.0
  * @see ChunkHolder
  * @see ChunkisNetworking#sendDelta(ServerPlayerEntity, WorldChunk)
  */

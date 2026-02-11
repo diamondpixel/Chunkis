@@ -9,7 +9,8 @@
     "storage.StoragePreventionMixin",
     "storage.ThreadedAnvilChunkStorageMixin",
     "world.WorldChunkMixin",
-    "network.ChunkHolderMixin"
+    "network.ChunkHolderMixin",
+    "world.SpawnHelperMixin"
   ],
   "injectors": {
     "defaultRequire": 1

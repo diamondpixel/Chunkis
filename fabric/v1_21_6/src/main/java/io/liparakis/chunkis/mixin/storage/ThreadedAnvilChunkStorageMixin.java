@@ -27,11 +27,26 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
+import net.minecraft.world.level.storage.LevelStorage;
+import com.mojang.datafixers.DataFixer;
+import net.minecraft.structure.StructureTemplateManager;
+import java.util.concurrent.Executor;
+import net.minecraft.util.thread.ThreadExecutor;
+import net.minecraft.world.chunk.ChunkProvider;
+import net.minecraft.world.gen.chunk.ChunkGenerator;
+import net.minecraft.server.WorldGenerationProgressListener;
+import net.minecraft.world.chunk.ChunkStatusChangeListener;
+import java.util.function.Supplier;
+import net.minecraft.server.world.ChunkTicketManager;
+
 /**
  * Mixin to intercept chunk loading/saving and delegate to CIS storage system.
  * <p>
  * Thread Safety: All methods execute on the server thread context.
  * Performance: Minimizes allocations and uses lazy initialization.
+ *
+ * @author Liparakis
+ * @version 1.0
  */
 @Mixin(ServerChunkLoadingManager.class)
 public abstract class ThreadedAnvilChunkStorageMixin {
@@ -44,10 +59,24 @@ public abstract class ThreadedAnvilChunkStorageMixin {
 
     /**
      * Injects into the constructor to capture the ServerWorld instance.
-     * Use simple class name for constructor injection.
      */
     @Inject(method = "<init>", at = @At("RETURN"))
-    private void chunkis$onInit(ServerWorld world, CallbackInfo ci) {
+    private void chunkis$onInit(
+            ServerWorld world,
+            LevelStorage.Session session,
+            DataFixer dataFixer,
+            StructureTemplateManager structureTemplateManager,
+            Executor executor,
+            ThreadExecutor<?> mainThreadExecutor,
+            ChunkProvider chunkProvider,
+            ChunkGenerator chunkGenerator,
+            WorldGenerationProgressListener worldGenerationProgressListener,
+            ChunkStatusChangeListener chunkStatusChangeListener,
+            Supplier<?> persistenceStateManagerFactory,
+            ChunkTicketManager chunkTicketManager,
+            int viewDistance,
+            boolean syncChunkWrites,
+            CallbackInfo ci) {
         this.chunkis$world = world;
     }
 
@@ -57,11 +86,15 @@ public abstract class ThreadedAnvilChunkStorageMixin {
     @Unique
     private static final int GAME_DATA_VERSION = SharedConstants.getGameVersion().dataVersion().id();
 
+    /*
+     * The underlying storage manager for .cis files.
+     */
     /**
      * The underlying storage manager for .cis files.
      */
     @Inject(method = "close", at = @At("HEAD"))
     private void chunkis$onClose(CallbackInfo ci) {
+        // Ensure CIS storage is properly closed when the server shuts down
         FabricCisStorageHelper.closeStorage(chunkis$world);
     }
 
@@ -95,14 +128,12 @@ public abstract class ThreadedAnvilChunkStorageMixin {
      * Intercepts chunk saving to use CIS storage instead of vanilla format.
      * Captures block entities and entities, then saves if dirty.
      */
-    @SuppressWarnings("unchecked")
     @Inject(method = "save(Lnet/minecraft/server/world/ChunkHolder;J)Z", at = @At("HEAD"), cancellable = true)
     private void chunkis$onSave(ChunkHolder chunkHolder, long currentTime, CallbackInfoReturnable<Boolean> cir) {
         // Attempt to get chunk from saving future (standard way to get ProtoChunk or
         // WorldChunk during save)
         var future = chunkHolder.getSavingFuture();
 
-        @SuppressWarnings("unchecked")
         OptionalChunk<Chunk> optionalChunk = (OptionalChunk<Chunk>) future.getNow(null);
 
         Chunk chunk = (optionalChunk != null) ? optionalChunk.orElse(null) : null;

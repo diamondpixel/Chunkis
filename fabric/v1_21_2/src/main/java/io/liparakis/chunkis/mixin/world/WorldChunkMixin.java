@@ -2,6 +2,7 @@ package io.liparakis.chunkis.mixin.world;
 
 import io.liparakis.chunkis.api.ChunkisDeltaDuck;
 import io.liparakis.chunkis.core.ChunkDelta;
+import io.liparakis.chunkis.util.LeafTickContext;
 import io.liparakis.chunkis.util.VanillaChunkSnapshot;
 import io.liparakis.chunkis.storage.CisConstants;
 import net.minecraft.block.BlockState;
@@ -30,7 +31,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  *
  * This mixin no longer implements `ChunkisDeltaDuck` directly; it relies on
  * {@link CommonChunkMixin} being applied to the base
+ * {@link CommonChunkMixin} being applied to the base
  * {@link net.minecraft.world.chunk.Chunk}.
+ *
+ * @author Liparakis
+ * @version 1.0
  */
 @Mixin(WorldChunk.class)
 public class WorldChunkMixin {
@@ -88,7 +93,7 @@ public class WorldChunkMixin {
         }
 
         // Early exit: leaf natural decay
-        if (state.getBlock() instanceof LeavesBlock && io.liparakis.chunkis.util.LeafTickContext.get()) {
+        if (state.getBlock() instanceof LeavesBlock && LeafTickContext.isActive()) {
             return;
         }
 

@@ -23,11 +23,14 @@ import java.util.List;
  * - Uses chunk coordinate math instead of entity.getChunkPos()
  * - Batches entity queries on server thread
  * - Skips redundant checks early
+ *
+ * @author Liparakis
+ * @version 1.0
  */
 public final class ChunkEntityCapture {
 
     private ChunkEntityCapture() {
-        // Utility class
+        // Private constructor to prevent instantiation
     }
 
     /**
@@ -54,8 +57,7 @@ public final class ChunkEntityCapture {
             if (shouldCaptureEntity(entity, chunkPos)) {
                 // 1.21.6: Use NbtWriteView to serialize entity data
                 NbtWriteView writeView = NbtWriteView.create(
-                        ErrorReporter.EMPTY
-                );
+                        ErrorReporter.EMPTY);
                 entity.saveData(writeView);
                 NbtCompound nbt = writeView.getNbt();
                 if (!nbt.isEmpty()) {
@@ -84,7 +86,7 @@ public final class ChunkEntityCapture {
                 world.getBottomY(),
                 pos.getStartZ(),
                 pos.getEndX() + 1.0,
-                world.getHeight(),  // Max world height
+                world.getHeight(), // Max world height
                 pos.getEndZ() + 1.0);
 
         // Server thread query - safe as mixin executes on server thread

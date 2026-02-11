@@ -18,7 +18,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
 /**
- * Comprehensive tests for {@link PropertyPacker} ensuring correct caching, bit-packing, and structure.
+ * Comprehensive tests for {@link PropertyPacker} ensuring correct caching,
+ * bit-packing, and structure.
  */
 @ExtendWith(MockitoExtension.class)
 class PropertyPackerTest {
@@ -66,7 +67,7 @@ class PropertyPackerTest {
 
     @Test
     void getPropertyMetasCreatesSortedMetadataForSingleProperty() {
-        List<String> properties = new ArrayList<>(Arrays.asList("facing"));
+        List<String> properties = new ArrayList<>(List.of("facing"));
         when(mockAdapter.getProperties("furnace")).thenReturn(properties);
         when(mockAdapter.getPropertyValues("facing")).thenReturn(Arrays.asList("north", "south", "east", "west"));
 
@@ -114,17 +115,36 @@ class PropertyPackerTest {
     }
 
     @Test
-    void getPropertyMetasCachesDifferentBlocksSeparately() {
+    void getPropertyMetasReturnsSingletonEmptyArrayForBlocksWithNoProperties() {
         when(mockAdapter.getProperties("stone")).thenReturn(new ArrayList<>());
         when(mockAdapter.getProperties("dirt")).thenReturn(new ArrayList<>());
 
         PropertyMeta<String>[] stoneMetas = packer.getPropertyMetas("stone");
         PropertyMeta<String>[] dirtMetas = packer.getPropertyMetas("dirt");
 
-        // Different blocks should have different cache entries
-        assertThat(stoneMetas).isNotSameAs(dirtMetas);
+        // Both should return the same singleton instance
+        assertThat(stoneMetas).isSameAs(dirtMetas);
+
+        // getProperties should be called for each block
         verify(mockAdapter, times(1)).getProperties("stone");
         verify(mockAdapter, times(1)).getProperties("dirt");
+    }
+
+    @Test
+    void getPropertyMetasReturnsDifferentArraysForDifferentBlocksWithProperties() {
+        when(mockAdapter.getProperties("stone")).thenReturn(List.of("prop1"));
+        when(mockAdapter.getPropertyValues("prop1")).thenReturn(List.of("val1", "val2"));
+
+        when(mockAdapter.getProperties("dirt")).thenReturn(List.of("prop2"));
+        when(mockAdapter.getPropertyValues("prop2")).thenReturn(List.of("val3"));
+
+        PropertyMeta<String>[] stoneMetas = packer.getPropertyMetas("stone");
+        PropertyMeta<String>[] dirtMetas = packer.getPropertyMetas("dirt");
+
+        // Should return different array instances
+        assertThat(stoneMetas).isNotSameAs(dirtMetas);
+        assertThat(stoneMetas).hasSize(1);
+        assertThat(dirtMetas).hasSize(1);
     }
 
     // ========== PropertyMeta Constructor Tests ==========
@@ -191,7 +211,7 @@ class PropertyPackerTest {
 
     @Test
     void writePropertiesWritesSinglePropertyValue() {
-        PropertyMeta<String>[] metas = new PropertyMeta[]{
+        PropertyMeta<String>[] metas = new PropertyMeta[] {
                 new PropertyMeta<>("facing", 4)
         };
 
@@ -205,10 +225,10 @@ class PropertyPackerTest {
 
     @Test
     void writePropertiesWritesMultiplePropertiesInOrder() {
-        PropertyMeta<String>[] metas = new PropertyMeta[]{
-                new PropertyMeta<>("facing", 4),  // 2 bits
-                new PropertyMeta<>("lit", 2),     // 1 bit
-                new PropertyMeta<>("powered", 2)  // 1 bit
+        PropertyMeta<String>[] metas = new PropertyMeta[] {
+                new PropertyMeta<>("facing", 4), // 2 bits
+                new PropertyMeta<>("lit", 2), // 1 bit
+                new PropertyMeta<>("powered", 2) // 1 bit
         };
 
         when(mockAdapter.getValueIndex(200, "facing")).thenReturn(3);
@@ -228,7 +248,7 @@ class PropertyPackerTest {
 
     @Test
     void writePropertiesHandlesZeroValueIndex() {
-        PropertyMeta<String>[] metas = new PropertyMeta[]{
+        PropertyMeta<String>[] metas = new PropertyMeta[] {
                 new PropertyMeta<>("prop", 8)
         };
 
@@ -241,7 +261,7 @@ class PropertyPackerTest {
 
     @Test
     void writePropertiesHandlesMaxValueIndex() {
-        PropertyMeta<String>[] metas = new PropertyMeta[]{
+        PropertyMeta<String>[] metas = new PropertyMeta[] {
                 new PropertyMeta<>("prop", 8) // 3 bits, max index = 7
         };
 
@@ -268,7 +288,7 @@ class PropertyPackerTest {
 
     @Test
     void readPropertiesReadsSinglePropertyAndAppliesIt() {
-        PropertyMeta<String>[] metas = new PropertyMeta[]{
+        PropertyMeta<String>[] metas = new PropertyMeta[] {
                 new PropertyMeta<>("facing", 4) // 2 bits
         };
 
@@ -286,10 +306,10 @@ class PropertyPackerTest {
 
     @Test
     void readPropertiesReadsMultiplePropertiesInOrderAndAppliesThem() {
-        PropertyMeta<String>[] metas = new PropertyMeta[]{
-                new PropertyMeta<>("facing", 4),  // 2 bits
-                new PropertyMeta<>("lit", 2),     // 1 bit
-                new PropertyMeta<>("powered", 2)  // 1 bit
+        PropertyMeta<String>[] metas = new PropertyMeta[] {
+                new PropertyMeta<>("facing", 4), // 2 bits
+                new PropertyMeta<>("lit", 2), // 1 bit
+                new PropertyMeta<>("powered", 2) // 1 bit
         };
 
         when(mockAdapter.getDefaultState("lamp")).thenReturn(600);
@@ -313,7 +333,7 @@ class PropertyPackerTest {
 
     @Test
     void readPropertiesHandlesZeroIndex() {
-        PropertyMeta<String>[] metas = new PropertyMeta[]{
+        PropertyMeta<String>[] metas = new PropertyMeta[] {
                 new PropertyMeta<>("prop", 8)
         };
 
@@ -330,7 +350,7 @@ class PropertyPackerTest {
 
     @Test
     void readPropertiesHandlesMaxIndexForBitWidth() {
-        PropertyMeta<String>[] metas = new PropertyMeta[]{
+        PropertyMeta<String>[] metas = new PropertyMeta[] {
                 new PropertyMeta<>("prop", 8) // 3 bits, max = 7
         };
 
@@ -347,7 +367,7 @@ class PropertyPackerTest {
 
     @Test
     void readPropertiesCastsLongToIntCorrectly() {
-        PropertyMeta<String>[] metas = new PropertyMeta[]{
+        PropertyMeta<String>[] metas = new PropertyMeta[] {
                 new PropertyMeta<>("prop", 16) // 4 bits
         };
 
@@ -395,5 +415,29 @@ class PropertyPackerTest {
         Integer result = packer.readProperties(mockReader, "torch", metas);
 
         assertThat(result).isEqualTo(2003);
+    }
+
+    @Test
+    void getPropertyMetasHandlesImmutableListFromAdapter() {
+        // Return an immutable list from getProperties to replicate the crash
+        List<String> immutableProps = List.of("waterlogged", "facing", "lit");
+        when(mockAdapter.getProperties("lamp")).thenReturn(immutableProps);
+
+        when(mockAdapter.getPropertyName("waterlogged")).thenReturn("waterlogged");
+        when(mockAdapter.getPropertyName("facing")).thenReturn("facing");
+        when(mockAdapter.getPropertyName("lit")).thenReturn("lit");
+
+        when(mockAdapter.getPropertyValues("waterlogged")).thenReturn(Arrays.asList("true", "false"));
+        when(mockAdapter.getPropertyValues("facing")).thenReturn(Arrays.asList("north", "south", "east", "west"));
+        when(mockAdapter.getPropertyValues("lit")).thenReturn(Arrays.asList("true", "false"));
+
+        // Should not throw UnsupportedOperationException
+        PropertyMeta<String>[] metas = packer.getPropertyMetas("lamp");
+
+        assertThat(metas).hasSize(3);
+        // Should be sorted alphabetically: facing, lit, waterlogged
+        assertThat(metas[0].property()).isEqualTo("facing");
+        assertThat(metas[1].property()).isEqualTo("lit");
+        assertThat(metas[2].property()).isEqualTo("waterlogged");
     }
 }

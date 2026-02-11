@@ -131,6 +131,16 @@ public final class ChunkDelta<S, N> {
         cleanupBlockEntityIfAir(newState, posKey);
     }
 
+    /**
+     * Updates an existing instruction in the packed array.
+     *
+     * @param x         Local X coordinate.
+     * @param y         Local Y coordinate.
+     * @param z         Local Z coordinate.
+     * @param paletteId The palette index for the block state.
+     * @param index     The index in the {@code packedInstructions} array.
+     * @param markDirty Whether to mark the delta as dirty.
+     */
     private void updateExistingInstruction(int x, int y, int z, int paletteId, int index, boolean markDirty) {
         final long newInstruction = new BlockInstruction((byte) x, y, (byte) z, paletteId).pack();
 
@@ -145,6 +155,16 @@ public final class ChunkDelta<S, N> {
         }
     }
 
+    /**
+     * Adds a new instruction to the packed array.
+     *
+     * @param x         Local X coordinate.
+     * @param y         Local Y coordinate.
+     * @param z         Local Z coordinate.
+     * @param paletteId The palette index for the block state.
+     * @param posKey    The packed position key.
+     * @param markDirty Whether to mark the delta as dirty.
+     */
     private void addNewInstruction(int x, int y, int z, int paletteId, long posKey, boolean markDirty) {
         ensureCapacity();
         packedInstructions[instructionCount] = new BlockInstruction((byte) x, y, (byte) z, paletteId).pack();
@@ -155,6 +175,12 @@ public final class ChunkDelta<S, N> {
         }
     }
 
+    /**
+     * Removes block entity data if the new state is considered "empty" (e.g., air).
+     *
+     * @param state  The new block state.
+     * @param posKey The packed position key.
+     */
     private void cleanupBlockEntityIfAir(S state, long posKey) {
         if (isEmptyState.test(state) && blockEntities != null) {
             blockEntities.remove(posKey);
@@ -179,16 +205,34 @@ public final class ChunkDelta<S, N> {
         this.isDirty = true;
     }
 
+    /**
+     * Removes the position key from the position map.
+     *
+     * @param posKey The packed position key.
+     */
     private void removeFromPositionMap(long posKey) {
         positionMap.remove(posKey);
     }
 
+    /**
+     * Removes associated block entity data for the given position.
+     *
+     * @param posKey The packed position key.
+     */
     private void removeBlockEntityData(long posKey) {
         if (blockEntities != null) {
             blockEntities.remove(posKey);
         }
     }
 
+    /**
+     * Removes an instruction by swapping it with the last element and shrinking the
+     * array.
+     * <p>
+     * This avoids costly array copies (O(1) removal).
+     *
+     * @param index The index of the instruction to remove.
+     */
     private void swapWithLastAndShrink(int index) {
         instructionCount--;
 
@@ -204,6 +248,10 @@ public final class ChunkDelta<S, N> {
         positionMap.put(lastPosKey, index);
     }
 
+    /**
+     * Ensures the instructions array has enough capacity for a new element.
+     * Doubles capacity if needed.
+     */
     private void ensureCapacity() {
         if (instructionCount < packedInstructions.length) {
             return;

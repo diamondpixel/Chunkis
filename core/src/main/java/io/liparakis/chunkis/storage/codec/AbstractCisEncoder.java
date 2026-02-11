@@ -78,6 +78,9 @@ public abstract class AbstractCisEncoder<S, N> {
 
     protected abstract EncoderContext<S> getContext();
 
+    /**
+     * Converts a ChunkDelta to a CisChunk for efficient spatial access.
+     */
     private CisChunk<S> fromDelta(ChunkDelta<S, N> delta) {
         CisChunk<S> chunk = new CisChunk<>();
         Palette<S> palette = delta.getBlockPalette();
@@ -91,6 +94,9 @@ public abstract class AbstractCisEncoder<S, N> {
         return chunk;
     }
 
+    /**
+     * Collects all unique block states used in the chunk.
+     */
     private List<S> collectUsedStates(CisChunk<S> chunk) {
         Object2IntMap<S> uniqueStates = new Object2IntOpenHashMap<>();
         uniqueStates.put(airState, 0); // Always include air
@@ -98,13 +104,11 @@ public abstract class AbstractCisEncoder<S, N> {
         for (CisSection<S> section : chunk.getSections().values()) {
             if (section.mode == CisSection.MODE_SPARSE) {
                 for (int i = 0; i < section.sparseSize; i++) {
-                    @SuppressWarnings("unchecked")
                     S state = (S) section.sparseValues[i];
                     uniqueStates.put(state, 0);
                 }
             } else if (section.mode == CisSection.MODE_DENSE) {
                 for (Object o : section.denseBlocks) {
-                    @SuppressWarnings("unchecked")
                     S state = (S) o;
                     if (state != null && !stateAdapter.isAir(state)) {
                         uniqueStates.put(state, 0);
@@ -116,11 +120,17 @@ public abstract class AbstractCisEncoder<S, N> {
         return new ArrayList<>(uniqueStates.keySet());
     }
 
+    /**
+     * Writes the CIS file header.
+     */
     private static void writeHeader(DataOutputStream dos) throws IOException {
         dos.writeInt(CisConstants.MAGIC);
         dos.writeInt(CisConstants.VERSION);
     }
 
+    /**
+     * Writes all chunk sections.
+     */
     private void writeSections(DataOutputStream dos, EncoderContext<S> ctx, CisChunk<S> chunk)
             throws IOException {
         Int2ObjectMap<CisSection<S>> sections = chunk.getSections();
@@ -139,6 +149,9 @@ public abstract class AbstractCisEncoder<S, N> {
         dos.write(sectionData);
     }
 
+    /**
+     * Writes block entity data.
+     */
     private void writeBlockEntities(DataOutputStream dos, ChunkDelta<S, N> delta) throws IOException {
         Long2ObjectMap<N> bes = delta.getBlockEntities();
         dos.writeInt(bes.size());
@@ -154,6 +167,9 @@ public abstract class AbstractCisEncoder<S, N> {
         }
     }
 
+    /**
+     * Writes entity data.
+     */
     private void writeEntities(DataOutputStream dos, ChunkDelta<S, N> delta) throws IOException {
         List<N> entities = delta.getEntitiesList();
         int entityCount = (entities != null) ? entities.size() : 0;
@@ -166,6 +182,9 @@ public abstract class AbstractCisEncoder<S, N> {
         }
     }
 
+    /**
+     * Encodes a single section.
+     */
     private void encodeSection(EncoderContext<S> ctx, int sectionY, CisSection<S> section) {
         ctx.bitWriter.writeZigZag(sectionY, CisConstants.SECTION_Y_BITS);
 
@@ -182,6 +201,9 @@ public abstract class AbstractCisEncoder<S, N> {
         }
     }
 
+    /**
+     * Encodes a sparse section.
+     */
     private void encodeSparseSection(EncoderContext<S> ctx, CisSection<S> section) {
         ctx.bitWriter.write(CisConstants.SECTION_ENCODING_SPARSE, 1);
         ctx.bitWriter.write(section.sparseSize, CisConstants.BLOCK_COUNT_BITS);
@@ -192,7 +214,6 @@ public abstract class AbstractCisEncoder<S, N> {
             for (int i = 0; i < section.sparseSize; i++) {
                 ctx.bitWriter.write(section.sparseKeys[i] & 0xFFFF, 12);
 
-                @SuppressWarnings("unchecked")
                 S state = (S) section.sparseValues[i];
                 int globalIdx = ctx.globalIdMap.getInt(state);
                 ctx.bitWriter.write(globalIdx != -1 ? globalIdx : 0, globalBits);
@@ -200,6 +221,9 @@ public abstract class AbstractCisEncoder<S, N> {
         }
     }
 
+    /**
+     * Encodes a dense section.
+     */
     private void encodeDenseSection(EncoderContext<S> ctx, CisSection<S> section) {
         ctx.bitWriter.write(CisConstants.SECTION_ENCODING_DENSE, 1);
 
@@ -227,7 +251,6 @@ public abstract class AbstractCisEncoder<S, N> {
 
     protected void buildLocalPalette(EncoderContext<S> ctx, Object[] states) {
         for (int i = 0; i < SECTION_VOLUME; i++) {
-            @SuppressWarnings("unchecked")
             S state = (S) states[i];
             if (state != null && !stateAdapter.isAir(state) && !ctx.fastLocalPaletteIndex.containsKey(state)) {
                 int globalIdx = ctx.globalIdMap.getInt(state);
@@ -255,9 +278,11 @@ public abstract class AbstractCisEncoder<S, N> {
         return localAirIndex;
     }
 
+    /**
+     * write the block data for a dense section.
+     */
     private void writeBlockData(EncoderContext<S> ctx, Object[] states, int localAirIndex, int bitsPerBlock) {
         for (int i = 0; i < SECTION_VOLUME; i++) {
-            @SuppressWarnings("unchecked")
             S state = (S) states[i];
             int localIdx = (state == null || stateAdapter.isAir(state))
                     ? localAirIndex
@@ -268,9 +293,7 @@ public abstract class AbstractCisEncoder<S, N> {
     }
 
     protected static int calculateBitsNeeded(int maxValue) {
-        if (maxValue <= 1)
-            return 0;
-        return 32 - Integer.numberOfLeadingZeros(maxValue - 1);
+        return AbstractCisDecoder.calculateBitsNeeded(maxValue);
     }
 
     public static class EncoderContext<S> {

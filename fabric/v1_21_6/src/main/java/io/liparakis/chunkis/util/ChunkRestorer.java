@@ -2,7 +2,6 @@ package io.liparakis.chunkis.util;
 
 import io.liparakis.chunkis.Chunkis;
 import io.liparakis.chunkis.core.ChunkDelta;
-import io.liparakis.chunkis.util.VanillaChunkSnapshot;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.entity.EntityType;
@@ -17,26 +16,17 @@ import net.minecraft.world.chunk.WorldChunk;
  * <p>
  * Handles the application of block changes, block entities, and global entities
  * from a {@link ChunkDelta} to a {@link WorldChunk}.
+ *
+ * @author Liparakis
+ * @version 1.0
  */
 public final class ChunkRestorer {
 
     private ChunkRestorer() {
-        // Utility class
+        // Private constructor to prevent instantiation
     }
 
-    /**
-     * Applies all instructions from a delta to a chunk.
-     *
-     * @param world        The server world
-     * @param chunk        The chunk to restore
-     * @param protoDelta   The source delta (from ProtoChunk/Disk)
-     * @param runtimeDelta The runtime delta to populate (the one tracking live
-     *                     changes)
-     * @param snapshot     The vanilla snapshot for optimization (optional, can be
-     *                     null)
-     * @return True if optimization occurred (delta became dirty), false otherwise
-     */
-    @SuppressWarnings("unchecked")
+
     public static boolean restore(
             ServerWorld world,
             WorldChunk chunk,
@@ -98,6 +88,17 @@ public final class ChunkRestorer {
         }
     }
 
+    /**
+     * Applies a single block change to a chunk.
+     *
+     * @param chunk The chunk to modify.
+     * @param x     Local X coordinate (0-15).
+     * @param y     Local Y coordinate.
+     * @param z     Local Z coordinate (0-15).
+     * @param state The new block state.
+     * @param pos   Absolute position (for logging).
+     * @return True if successful, false if section was missing.
+     */
     private static boolean applyBlockChange(
             WorldChunk chunk,
             int x, int y, int z,
@@ -129,6 +130,17 @@ public final class ChunkRestorer {
         }
     }
 
+    /**
+     * Restores a single block entity from NBT.
+     *
+     * @param world        The server world.
+     * @param chunk        The chunk to modify.
+     * @param x            Local X coordinate.
+     * @param y            Local Y coordinate.
+     * @param z            Local Z coordinate.
+     * @param nbt          The block entity NBT data.
+     * @param runtimeDelta The runtime delta to update (optional).
+     */
     private static void restoreSingleBlockEntity(
             ServerWorld world,
             WorldChunk chunk,
@@ -174,6 +186,14 @@ public final class ChunkRestorer {
         }
     }
 
+    /**
+     * Restores a single entity from NBT.
+     *
+     * @param world        The server world.
+     * @param chunk        The chunk to spawn into.
+     * @param nbt          The entity NBT data.
+     * @param runtimeDelta The runtime delta to update (optional).
+     */
     private static void restoreSingleEntity(
             ServerWorld world,
             WorldChunk chunk,
@@ -185,9 +205,8 @@ public final class ChunkRestorer {
             net.minecraft.storage.ReadView readView = net.minecraft.storage.NbtReadView.create(
                     net.minecraft.util.ErrorReporter.EMPTY,
                     world.getRegistryManager(),
-                    nbt
-            );
-            
+                    nbt);
+
             EntityType.loadEntityWithPassengers(readView, world, net.minecraft.entity.SpawnReason.LOAD, entity -> {
                 if (world.getEntity(entity.getUuid()) != null) {
                     return entity;

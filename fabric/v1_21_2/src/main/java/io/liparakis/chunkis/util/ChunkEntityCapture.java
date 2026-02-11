@@ -1,6 +1,7 @@
 package io.liparakis.chunkis.util;
 
 import io.liparakis.chunkis.Chunkis;
+
 import io.liparakis.chunkis.core.ChunkDelta;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.PlayerEntity;
@@ -20,7 +21,11 @@ import java.util.List;
  * Performance optimizations:
  * - Uses chunk coordinate math instead of entity.getChunkPos()
  * - Batches entity queries on server thread
+ * - Batches entity queries on server thread
  * - Skips redundant checks early
+ *
+ * @author Liparakis
+ * @version 1.0
  */
 public final class ChunkEntityCapture {
 
@@ -77,7 +82,7 @@ public final class ChunkEntityCapture {
                 world.getBottomY(),
                 pos.getStartZ(),
                 pos.getEndX() + 1.0,
-                world.getHeight(),  // Max world height
+                world.getBottomY() + world.getHeight(),
                 pos.getEndZ() + 1.0);
 
         // Server thread query - safe as mixin executes on server thread

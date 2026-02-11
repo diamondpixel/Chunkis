@@ -12,4 +12,4 @@ pluginManagement {
 rootProject.name = 'Chunkis'
 
 include 'core', 'cis-debugger'
-include 'fabric:v1_21', 'fabric:v1_21_2', 'fabric:v1_21_5', 'fabric:v1_21_6', 'fabric:v1_21_11'
+include 'fabric:v1_21', 'fabric:v1_21_2', 'fabric:v1_21_5', 'fabric:v1_21_6', 'fabric:v1_21_11', 'fabric:common'

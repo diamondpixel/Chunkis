@@ -10,6 +10,9 @@ import org.spongepowered.asm.mixin.Unique;
  * Mixin for the base {@link Chunk} class to provide {@link ChunkDelta}
  * capability
  * to all chunk types (ProtoChunk, WorldChunk, etc.).
+ *
+ * @author Liparakis
+ * @version 1.0
  */
 @Mixin(Chunk.class)
 public abstract class CommonChunkMixin implements ChunkisDeltaDuck {

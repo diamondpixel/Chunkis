@@ -15,6 +15,9 @@ import net.minecraft.world.chunk.WorldChunk;
  * - Uses bitwise AND for local coordinate conversion (faster than modulo)
  * - Skips removed block entities early
  * - Reuses registry manager from chunk world
+ *
+ * @author Liparakis
+ * @version 1.0
  */
 public final class ChunkBlockEntityCapture {
 

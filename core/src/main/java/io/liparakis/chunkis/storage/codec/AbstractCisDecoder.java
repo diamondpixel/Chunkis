@@ -110,6 +110,15 @@ public abstract class AbstractCisDecoder<S, N> {
         return HEADER_SIZE;
     }
 
+    /**
+     * Decodes all chunk sections from the data stream.
+     *
+     * @param data   The raw byte array.
+     * @param offset The current read offset.
+     * @param delta  The delta to populate.
+     * @return The new offset after reading sections.
+     * @throws IOException If data is truncated or invalid.
+     */
     private int decodeSections(byte[] data, int offset, ChunkDelta<S, N> delta) throws IOException {
         if (offset + 6 > data.length) {
             throw new IOException("Truncated data: cannot read section header");
@@ -136,6 +145,12 @@ public abstract class AbstractCisDecoder<S, N> {
         return offset + sectionDataLength;
     }
 
+    /**
+     * Decodes a single section.
+     *
+     * @param reader The bit reader positioned at the section start.
+     * @param delta  The delta to populate.
+     */
     private void decodeSection(BitReader reader, ChunkDelta<S, N> delta) {
         int sectionY = reader.readZigZag(CisConstants.SECTION_Y_BITS);
         int mode = (int) reader.read(1);
@@ -149,6 +164,9 @@ public abstract class AbstractCisDecoder<S, N> {
         }
     }
 
+    /**
+     * Decodes a sparse section (list of blocks).
+     */
     private void decodeSparseSection(BitReader reader, ChunkDelta<S, N> delta, int sectionY, int globalBits) {
         int blockCount = (int) reader.read(CisConstants.BLOCK_COUNT_BITS);
 
@@ -172,6 +190,9 @@ public abstract class AbstractCisDecoder<S, N> {
         }
     }
 
+    /**
+     * Decodes a dense section (full 16x16x16 array).
+     */
     private void decodeDenseSection(BitReader reader, ChunkDelta<S, N> delta, int sectionY, int globalBits) {
         int localSize = (int) reader.read(8);
 
@@ -207,6 +228,9 @@ public abstract class AbstractCisDecoder<S, N> {
         }
     }
 
+    /**
+     * Decodes block entities and global entities from the stream.
+     */
     private void decodeBlockEntitiesAndEntities(byte[] data, int offset, ChunkDelta<S, N> delta) {
         if (offset >= data.length) {
             return;

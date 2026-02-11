@@ -25,6 +25,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * This mixin allows the Chunkis system to save and load its proprietary delta
  * data
  * within the standard Minecraft chunk save process.
+ *
+ * @author Liparakis
+ * @version 1.0
  */
 @Mixin(SerializedChunk.class)
 public class ChunkSerializerMixin {
@@ -36,6 +39,19 @@ public class ChunkSerializerMixin {
     @Unique
     private static final int MAX_INSTRUCTION_THRESHOLD = 1000;
 
+    /*
+     * Injects into the beginning of the fromChunk method to handle Chunkis-specific
+     * serialization.
+     * <p>
+     * If a chunk contains a {@link ChunkDelta} that is dirty and below the size
+     * threshold,
+     * it will be serialized as a minimal "Chunkis" chunk instead of using the
+     * vanilla format.
+     *
+     * @param world the server world
+     * @param chunk the chunk to serialize
+     * @param cir   the callback info for returning a custom SerializedChunk
+     */
     /**
      * Injects into the beginning of the fromChunk method to handle Chunkis-specific
      * serialization.
@@ -50,7 +66,8 @@ public class ChunkSerializerMixin {
      * @param cir   the callback info for returning a custom SerializedChunk
      */
     @Inject(method = "fromChunk", at = @At("HEAD"))
-    private static void chunkis$onFromChunk(ServerWorld world, Chunk chunk, CallbackInfoReturnable<SerializedChunk> cir) {
+    private static void chunkis$onFromChunk(ServerWorld world, Chunk chunk,
+            CallbackInfoReturnable<SerializedChunk> cir) {
         if (!(chunk instanceof ChunkisDeltaDuck duck)) {
             return;
         }
@@ -68,36 +85,29 @@ public class ChunkSerializerMixin {
             return;
         }
 
-        // For 1.21.2+, we need to handle this differently since SerializedChunk is now a data class
+        // For 1.21.2+, we need to handle this differently since SerializedChunk is now
+        // a data class
         // We'll attach our delta data and let the normal serialization proceed,
         // then intercept in serialize() to add our custom data
         // For now, we mark the delta as pending serialization
         delta.markSaved();
     }
 
-    /**
-     * Creates a minimal NBT structure for a chunk that is being saved as a Chunkis
-     * delta.
+    /*
+     * Injects into the end of the convert method to handle Chunkis-specific
+     * restoration.
      * <p>
-     * This structure includes basic identity information (position, version) but
-     * sets
-     * the status to {@code EMPTY} to force terrain regeneration on load.
+     * If the NBT data contains a Chunkis data key, this method will read the delta
+     * and force the chunk status to {@link ChunkStatus#EMPTY} to ensure that the
+     * world generator applies the delta on top of a fresh terrain.
      *
-     * @param world the server world
-     * @param chunk the chunk being saved
-     * @return a minimal {@link NbtCompound} containing chunk metadata
+     * @param world       the server world
+     * @param poiStorage  the point of interest storage
+     * @param key         the storage key
+     * @param expectedPos the expected chunk position
+     * @param cir         the callback info containing the returned
+     *                    {@link ProtoChunk}
      */
-    @Unique
-    private static NbtCompound chunkis$createMinimalNbt(ServerWorld world, Chunk chunk) {
-        ChunkPos pos = chunk.getPos();
-        int dataVersion = net.minecraft.SharedConstants.getGameVersion().getSaveVersion().getId();
-
-        NbtCompound nbt = CisNbtUtil.createBaseNbt(pos, dataVersion);
-        nbt.putLong(CisNbtUtil.LAST_UPDATE_KEY, world.getTime());
-
-        return nbt;
-    }
-
     /**
      * Injects into the end of the convert method to handle Chunkis-specific
      * restoration.
@@ -106,12 +116,12 @@ public class ChunkSerializerMixin {
      * and force the chunk status to {@link ChunkStatus#EMPTY} to ensure that the
      * world generator applies the delta on top of a fresh terrain.
      *
-     * @param world      the server world
-     * @param poiStorage the point of interest storage
-     * @param key        the storage key
+     * @param world       the server world
+     * @param poiStorage  the point of interest storage
+     * @param key         the storage key
      * @param expectedPos the expected chunk position
-     * @param cir        the callback info containing the returned
-     *                   {@link ProtoChunk}
+     * @param cir         the callback info containing the returned
+     *                    {@link ProtoChunk}
      */
     @Inject(method = "convert", at = @At("RETURN"))
     private static void chunkis$onConvert(ServerWorld world, PointOfInterestStorage poiStorage, StorageKey key,

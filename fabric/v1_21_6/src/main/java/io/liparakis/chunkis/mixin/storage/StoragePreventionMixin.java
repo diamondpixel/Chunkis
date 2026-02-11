@@ -19,6 +19,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * to ensure that the game does not attempt to use the standard region file
  * format,
  * effectively ceding control of chunk persistence to the Chunkis system.
+ *
+ * @author Liparakis
+ * @version 1.0
  */
 @Mixin(RegionBasedStorage.class)
 public class StoragePreventionMixin {
@@ -26,7 +29,7 @@ public class StoragePreventionMixin {
     /**
      * Prevents writing chunk data to the vanilla region files.
      */
-    @Inject(method = "write(Lnet/minecraft/util/math/ChunkPos;Lnet/minecraft/nbt/NbtCompound;)V", at = @At("HEAD"), cancellable = true, require = 0)
+    @Inject(method = "write(Lnet/minecraft/util/math/ChunkPos;Lnet/minecraft/nbt/NbtCompound;)V", at = @At("HEAD"), cancellable = true)
     private void chunkis$blockWrite(ChunkPos pos, NbtCompound nbt, CallbackInfo ci) {
         ci.cancel();
     }
@@ -34,7 +37,7 @@ public class StoragePreventionMixin {
     /**
      * Prevents retrieving chunk NBT from vanilla region files.
      */
-    @Inject(method = "getTagAt(Lnet/minecraft/util/math/ChunkPos;)Lnet/minecraft/nbt/NbtCompound;", at = @At("HEAD"), cancellable = true, require = 0)
+    @Inject(method = "getTagAt(Lnet/minecraft/util/math/ChunkPos;)Lnet/minecraft/nbt/NbtCompound;", at = @At("HEAD"), cancellable = true)
     private void chunkis$blockGetTagAt(ChunkPos pos, CallbackInfoReturnable<NbtCompound> cir) {
         cir.setReturnValue(null);
     }
@@ -42,7 +45,7 @@ public class StoragePreventionMixin {
     /**
      * Prevents scanning chunks in vanilla region files.
      */
-    @Inject(method = "scanChunk(Lnet/minecraft/util/math/ChunkPos;Lnet/minecraft/nbt/scanner/NbtScanner;)V", at = @At("HEAD"), cancellable = true, require = 0)
+    @Inject(method = "scanChunk(Lnet/minecraft/util/math/ChunkPos;Lnet/minecraft/nbt/scanner/NbtScanner;)V", at = @At("HEAD"), cancellable = true)
     private void chunkis$blockScanChunk(ChunkPos pos, NbtScanner scanner, CallbackInfo ci) {
         ci.cancel();
     }
@@ -50,7 +53,7 @@ public class StoragePreventionMixin {
     /**
      * Prevents synchronization of vanilla region storage.
      */
-    @Inject(method = "sync()V", at = @At("HEAD"), cancellable = true, require = 0)
+    @Inject(method = "sync()V", at = @At("HEAD"), cancellable = true)
     private void chunkis$blockSync(CallbackInfo ci) {
         ci.cancel();
     }

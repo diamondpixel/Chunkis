@@ -34,6 +34,9 @@ import java.util.concurrent.CompletableFuture;
  * <p>
  * Thread Safety: All methods execute on the server thread context.
  * Performance: Minimizes allocations and uses lazy initialization.
+ *
+ * @author Liparakis
+ * @version 1.0
  */
 @Mixin(ServerChunkLoadingManager.class)
 public abstract class ThreadedAnvilChunkStorageMixin {
@@ -48,17 +51,20 @@ public abstract class ThreadedAnvilChunkStorageMixin {
     @Unique
     private static final int GAME_DATA_VERSION = SharedConstants.getGameVersion().getSaveVersion().getId();
 
+    /*
+     * The underlying storage manager for .cis files.
+     */
     /**
      * The underlying storage manager for .cis files.
      */
     @Inject(method = "close", at = @At("HEAD"))
     private void chunkis$onClose(CallbackInfo ci) {
+        // Ensure CIS storage is properly closed when the server shuts down
         FabricCisStorageHelper.closeStorage(world);
     }
 
     /**
      * Intercepts chunk NBT loading to provide CIS-stored chunks.
-     * Only creates NBT wrapper if delta exists, avoiding unnecessary allocations.
      */
     @Inject(method = "getUpdatedChunkNbt(Lnet/minecraft/util/math/ChunkPos;)Ljava/util/concurrent/CompletableFuture;", at = @At("HEAD"), cancellable = true)
     private void chunkis$onGetUpdatedChunkNbt(
@@ -74,10 +80,13 @@ public abstract class ThreadedAnvilChunkStorageMixin {
 
     /**
      * Lazy initialization of CisStorage.
+     * <p>
      * Thread-safe as all access is on server thread.
+     *
+     * @return The active CisStorage instance for this world.
      */
-    @SuppressWarnings("rawtypes")
     @Unique
+    @SuppressWarnings("rawtypes")
     private CisStorage chunkis$getOrCreateStorage() {
         return FabricCisStorageHelper.getStorage(world);
     }
@@ -86,21 +95,17 @@ public abstract class ThreadedAnvilChunkStorageMixin {
      * Intercepts chunk saving to use CIS storage instead of anilla format.
      * Captures block entities and entities, then saves if dirty.
      */
-    @SuppressWarnings("unchecked")
+
     @Inject(method = "save(Lnet/minecraft/server/world/ChunkHolder;)Z", at = @At("HEAD"), cancellable = true)
     private void chunkis$onSave(ChunkHolder chunkHolder, CallbackInfoReturnable<Boolean> cir) {
-        // Attempt to get chunk from saving future (standard way to get ProtoChunk or
-        // WorldChunk during save)
+
         var future = chunkHolder.getSavingFuture();
 
-        @SuppressWarnings("unchecked")
         OptionalChunk<Chunk> optionalChunk = (OptionalChunk<Chunk>) future.getNow(null);
 
         Chunk chunk = (optionalChunk != null) ? optionalChunk.orElse(null) : null;
 
         if (chunk == null) {
-            // Fallback to WorldChunk if future is not ready/available (mostly for fully
-            // loaded chunks)
             chunk = chunkHolder.getWorldChunk();
         }
 
@@ -128,8 +133,7 @@ public abstract class ThreadedAnvilChunkStorageMixin {
         }
 
         chunk.setNeedsSaving(false);
-
-        cir.setReturnValue(true); // Suppress vanilla save
+        cir.setReturnValue(true);
     }
 
     // ===== Helper Methods =====

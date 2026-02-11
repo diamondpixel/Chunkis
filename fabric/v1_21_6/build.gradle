@@ -19,8 +19,9 @@ repositories {
 }
 
 dependencies {
-    // Core module dependency
-    implementation project(path: ":core", configuration: "namedElements")
+    // Common module dependency (includes core API)
+    implementation project(path: ":fabric:common", configuration: "namedElements")
+    include project(":fabric:common")
     include project(":core")  // Bundle core into JAR
     
     // Minecraft 1.21.6 dependencies

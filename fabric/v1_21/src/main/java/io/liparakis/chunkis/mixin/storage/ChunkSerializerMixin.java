@@ -25,6 +25,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * This mixin allows the Chunkis system to save and load its proprietary delta
  * data
  * within the standard Minecraft chunk save process.
+ *
+ * @author Liparakis
+ * @version 1.0
  */
 @Mixin(ChunkSerializer.class)
 public class ChunkSerializerMixin {
@@ -129,7 +132,7 @@ public class ChunkSerializerMixin {
 
         // 2. Load delta
         io.liparakis.chunkis.core.CisChunkPos cisPos = new io.liparakis.chunkis.core.CisChunkPos(pos.x, pos.z);
-        ChunkDelta delta = (ChunkDelta) storage.load(cisPos);
+        ChunkDelta delta = storage.load(cisPos);
 
         // 3. Attach to ProtoChunk so WorldChunkMixin can find it later
         if (chunk instanceof ChunkisDeltaDuck duck) {

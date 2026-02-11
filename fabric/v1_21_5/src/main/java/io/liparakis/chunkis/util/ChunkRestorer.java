@@ -1,8 +1,8 @@
 package io.liparakis.chunkis.util;
 
-import io.liparakis.chunkis.Chunkis;
 import io.liparakis.chunkis.core.ChunkDelta;
-import io.liparakis.chunkis.util.VanillaChunkSnapshot;
+
+import io.liparakis.chunkis.Chunkis;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.entity.EntityType;
@@ -16,12 +16,16 @@ import net.minecraft.world.chunk.WorldChunk;
  * Utility for restoring chunks from Chunkis deltas.
  * <p>
  * Handles the application of block changes, block entities, and global entities
+ * Handles the application of block changes, block entities, and global entities
  * from a {@link ChunkDelta} to a {@link WorldChunk}.
+ *
+ * @author Liparakis
+ * @version 1.0
  */
 public final class ChunkRestorer {
 
     private ChunkRestorer() {
-        // Utility class
+        // Private constructor to prevent instantiation
     }
 
     /**
@@ -36,7 +40,6 @@ public final class ChunkRestorer {
      *                     null)
      * @return True if optimization occurred (delta became dirty), false otherwise
      */
-    @SuppressWarnings("unchecked")
     public static boolean restore(
             ServerWorld world,
             WorldChunk chunk,
@@ -98,6 +101,17 @@ public final class ChunkRestorer {
         }
     }
 
+    /**
+     * Applies a single block change to a chunk.
+     *
+     * @param chunk The chunk to modify.
+     * @param x     Local X coordinate (0-15).
+     * @param y     Local Y coordinate.
+     * @param z     Local Z coordinate (0-15).
+     * @param state The new block state.
+     * @param pos   Absolute position (for logging).
+     * @return True if successful, false if section was missing.
+     */
     private static boolean applyBlockChange(
             WorldChunk chunk,
             int x, int y, int z,
@@ -129,6 +143,17 @@ public final class ChunkRestorer {
         }
     }
 
+    /**
+     * Restores a single block entity from NBT.
+     *
+     * @param world        The server world.
+     * @param chunk        The chunk to modify.
+     * @param x            Local X coordinate.
+     * @param y            Local Y coordinate.
+     * @param z            Local Z coordinate.
+     * @param nbt          The block entity NBT data.
+     * @param runtimeDelta The runtime delta to update (optional).
+     */
     private static void restoreSingleBlockEntity(
             ServerWorld world,
             WorldChunk chunk,
@@ -174,6 +199,14 @@ public final class ChunkRestorer {
         }
     }
 
+    /**
+     * Restores a single entity from NBT.
+     *
+     * @param world        The server world.
+     * @param chunk        The chunk to spawn into.
+     * @param nbt          The entity NBT data.
+     * @param runtimeDelta The runtime delta to update (optional).
+     */
     private static void restoreSingleEntity(
             ServerWorld world,
             WorldChunk chunk,
