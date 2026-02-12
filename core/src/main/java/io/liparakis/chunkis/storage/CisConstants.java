@@ -34,6 +34,12 @@ public final class CisConstants {
     public static final int SECTION_SIZE = 16;
 
     /**
+     * Bit mask for extracting chunk-local coordinates (0-15).
+     * Equivalent to (SECTION_SIZE - 1).
+     */
+    public static final int COORD_MASK = SECTION_SIZE - 1;
+
+    /**
      * Minimum Y section index (-4 for world starting at Y=-64).
      */
     public static final int MIN_SECTION_Y = -4;

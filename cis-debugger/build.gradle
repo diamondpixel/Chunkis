@@ -1,6 +1,6 @@
 plugins {
     id 'java'
-    id 'org.jetbrains.intellij' version '1.17.4'
+    id 'org.jetbrains.intellij.platform' version '2.2.1'
 }
 
 group = 'io.liparakis.cisplugin'
@@ -8,6 +8,27 @@ version = '1.0.0'
 
 repositories {
     mavenCentral()
+    intellijPlatform {
+        defaultRepositories()
+    }
+}
+
+dependencies {
+    intellijPlatform {
+        intellijIdeaCommunity("2024.1")
+        instrumentationTools()
+        pluginVerifier()
+        zipSigner()
+    }
+}
+
+intellijPlatform {
+    pluginConfiguration {
+        ideaVersion {
+            sinceBuild = '241'
+            untilBuild = '253.*'
+        }
+    }
 }
 
 java {
@@ -18,21 +39,6 @@ java {
     }
 }
 
-intellij {
-    version = '2024.1'
-    type = 'IC' // IntelliJ Community
-    plugins = []
-}
-
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
-}
-
-tasks.named('patchPluginXml') {
-    sinceBuild = '241'
-    untilBuild = '253.*'
-}
-
-tasks.named('runIde') {
-    jvmArgs '-Xmx2g'
 }

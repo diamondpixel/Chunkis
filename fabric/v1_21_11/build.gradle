@@ -1,0 +1,57 @@
+plugins {
+    id 'fabric-loom'
+    id 'maven-publish'
+}
+
+version = project.property('mod_version')
+group = project.property('maven_group')
+
+base {
+    archivesName = "${project.property('archives_base_name')}-v1_21_11"
+}
+
+repositories {
+    mavenCentral()
+    maven {
+        name = 'Fabric'
+        url = 'https://maven.fabricmc.net/'
+    }
+}
+
+dependencies {
+    // Common module dependency (includes core API)
+    implementation project(path: ":fabric:common", configuration: "namedElements")
+    include project(":fabric:common")
+    include project(":core")  // Bundle core into JAR
+    
+    // Minecraft 1.21.11 dependencies
+    minecraft "com.mojang:minecraft:${project.property('minecraft_version_1_21_11')}"
+    mappings "net.fabricmc:yarn:${project.property('yarn_mappings_1_21_11')}:v2"
+
+    modImplementation "net.fabricmc:fabric-loader:${project.property('loader_version')}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.property('fabric_version_1_21_11')}"
+}
+
+processResources {
+    inputs.property "version", project.version
+    inputs.property "minecraft_version", project.property('minecraft_version_1_21_11')
+    inputs.property "loader_version", project.property('loader_version')
+    filteringCharset = "UTF-8"
+
+    filesMatching("fabric.mod.json") {
+        expand "version": project.version,
+               "minecraft_version": project.property('minecraft_version_1_21_11'),
+               "loader_version": project.property('loader_version')
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 21
+}
+
+java {
+    withSourcesJar()
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}

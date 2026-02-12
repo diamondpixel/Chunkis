@@ -10,6 +10,7 @@ build/
 *.iws
 *.iml
 *.ipr
+.intellijPlatform
 out/
 
 # IDEs - Eclipse

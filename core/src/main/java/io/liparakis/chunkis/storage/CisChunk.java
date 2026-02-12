@@ -20,11 +20,6 @@ public final class CisChunk<S> {
     private static final int SECTION_SHIFT = 4;
 
     /**
-     * Bit-mask for extracting local coordinates from world coordinates.
-     */
-    private static final int COORD_MASK = 15;
-
-    /**
      * Map of section Y-indices to their storage objects.
      */
     private final Int2ObjectMap<CisSection<S>> sections;
@@ -44,7 +39,6 @@ public final class CisChunk<S> {
      */
     public CisChunk() {
         this.sections = new Int2ObjectOpenHashMap<>();
-        this.lastSectionY = Integer.MIN_VALUE;
     }
 
     /**
@@ -73,7 +67,7 @@ public final class CisChunk<S> {
             lastSection = section;
         }
 
-        section.setBlock(x & COORD_MASK, y & COORD_MASK, z & COORD_MASK, state);
+        section.setBlock(x & CisConstants.COORD_MASK, y & CisConstants.COORD_MASK, z & CisConstants.COORD_MASK, state);
     }
 
     /**

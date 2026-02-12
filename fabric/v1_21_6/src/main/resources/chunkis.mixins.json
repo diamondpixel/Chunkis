@@ -1,0 +1,18 @@
+{
+  "required": true,
+  "package": "io.liparakis.chunkis.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "world.CommonChunkMixin",
+    "storage.ChunkSerializerMixin",
+    "world.LeavesBlockMixin",
+    "storage.StoragePreventionMixin",
+    "storage.ThreadedAnvilChunkStorageMixin",
+    "world.WorldChunkMixin",
+    "network.ChunkHolderMixin",
+    "world.SpawnHelperMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
