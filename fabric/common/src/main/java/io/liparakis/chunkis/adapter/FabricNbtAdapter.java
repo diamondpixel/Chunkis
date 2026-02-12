@@ -115,8 +115,12 @@ public final class FabricNbtAdapter implements NbtAdapter<NbtCompound> {
      */
     private NbtCompound readStreaming(DataInputStream input, int length) throws IOException {
         // Use bounded input stream to prevent over-reading
-        try (InputStream bounded = new BoundedInputStream(input, length)) {
-            return NbtIo.readCompressed(bounded, NbtSizeTracker.of(MAX_NBT_SIZE));
+        try (BoundedInputStream bounded = new BoundedInputStream(input, length)) {
+            NbtCompound nbt = NbtIo.readCompressed(bounded, NbtSizeTracker.of(MAX_NBT_SIZE));
+            // Ensure we consume all bytes allocated for this chunk to maintain stream
+            // synchronization
+            while (bounded.read() != -1) {}
+            return nbt;
         }
     }
 
@@ -191,5 +195,8 @@ public final class FabricNbtAdapter implements NbtAdapter<NbtCompound> {
                 remaining -= result;
             return result;
         }
+
+        @Override
+        public void close() {}
     }
 }

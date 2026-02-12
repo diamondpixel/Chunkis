@@ -275,7 +275,7 @@ public abstract class AbstractCisDecoder<S, N> {
             }
 
         } catch (IOException e) {
-            io.liparakis.chunkis.Chunkis.LOGGER.warn("Failed to decode block/entity data: {}", e.getMessage());
+            io.liparakis.chunkis.Chunkis.LOGGER.warn("Failed to decode block/entity data at offset {}: {}", offset, e.getMessage());
         }
     }
 
