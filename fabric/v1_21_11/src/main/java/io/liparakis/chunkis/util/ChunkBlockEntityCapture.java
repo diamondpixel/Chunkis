@@ -3,7 +3,9 @@ package io.liparakis.chunkis.util;
 import io.liparakis.chunkis.core.ChunkDelta;
 import io.liparakis.chunkis.storage.CisConstants;
 import net.minecraft.block.entity.BlockEntity;
+import net.minecraft.block.entity.BlockEntityType;
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.chunk.WorldChunk;
 
@@ -53,6 +55,12 @@ public final class ChunkBlockEntityCapture {
             // Serialize block entity with registry info
             // 1.21.6: Use createNbt to serialize block entity data
             NbtCompound nbt = blockEntity.createNbt(registryManager);
+
+            if (!nbt.contains("id")) {
+                Identifier id = BlockEntityType.getId(blockEntity.getType());
+                if (id != null) nbt.putString("id", id.toString());
+            }
+
             if (nbt.isEmpty()) {
                 continue; // Skip empty NBT
             }
