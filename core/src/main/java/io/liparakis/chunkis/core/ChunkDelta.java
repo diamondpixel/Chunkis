@@ -111,6 +111,14 @@ public final class ChunkDelta<S, N> {
     }
 
     /**
+     * Checks if a block change exists at the specified position.
+     */
+    public boolean hasBlockChange(int x, int y, int z) {
+        final long posKey = BlockInstruction.packPos(x, y, z);
+        return positionMap.containsKey(posKey);
+    }
+
+    /**
      * Adds or updates a block change at the specified position.
      */
     public void addBlockChange(int x, int y, int z, S newState, boolean markDirty) {
