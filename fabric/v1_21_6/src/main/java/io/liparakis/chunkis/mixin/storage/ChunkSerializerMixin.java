@@ -23,18 +23,20 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 /**
  * Mixin for {@link SerializedChunk} to intercept chunk deserialization.
  *
- * <p>Integrates Chunkis delta restoration into Minecraft's standard chunk loading
+ * <p>
+ * Integrates Chunkis delta restoration into Minecraft's standard chunk loading
  * pipeline. When chunks are loaded from disk, this mixin attempts to restore
  * associated delta data from either memory (GlobalChunkTracker) or persistent
  * storage, then resets the chunk status to trigger terrain regeneration with
  * the delta applied.
  *
- * <p><b>Restoration Flow:</b>
+ * <p>
+ * <b>Restoration Flow:</b>
  * <ol>
- *   <li>Check GlobalChunkTracker for in-memory delta (handles recent saves)</li>
- *   <li>Fallback to disk storage if not found in memory</li>
- *   <li>Attach delta to ProtoChunk for downstream processing</li>
- *   <li>Force chunk status to EMPTY to trigger generation pipeline</li>
+ * <li>Check GlobalChunkTracker for in-memory delta (handles recent saves)</li>
+ * <li>Fallback to disk storage if not found in memory</li>
+ * <li>Attach delta to ProtoChunk for downstream processing</li>
+ * <li>Force chunk status to EMPTY to trigger generation pipeline</li>
  * </ol>
  *
  * @author Liparakis
@@ -49,16 +51,20 @@ public class ChunkSerializerMixin {
     /**
      * Injects at the end of chunk deserialization to restore Chunkis delta data.
      *
-     * <p>This method implements a two-tier loading strategy: first checking the
-     * in-memory GlobalChunkTracker for recent deltas (avoiding race conditions during
+     * <p>
+     * This method implements a two-tier loading strategy: first checking the
+     * in-memory GlobalChunkTracker for recent deltas (avoiding race conditions
+     * during
      * rapid save/load cycles), then falling back to persistent storage. If a delta
      * is found, the chunk status is reset to {@link ChunkStatus#EMPTY} to ensure
      * the world generator applies the delta atop freshly generated terrain.
      *
      * @param world       the server world context for the chunk
-     * @param poiStorage  the point of interest storage (unused but required by inject)
+     * @param poiStorage  the point of interest storage (unused but required by
+     *                    inject)
      * @param key         the storage key for the chunk region
-     * @param expectedPos the expected chunk position (unused but required by inject)
+     * @param expectedPos the expected chunk position (unused but required by
+     *                    inject)
      * @param cir         callback containing the deserialized {@link ProtoChunk}
      */
     @Inject(method = "convert", at = @At("RETURN"))
@@ -80,6 +86,12 @@ public class ChunkSerializerMixin {
             return;
         }
 
+        // Trigger migration if needed
+        if (delta.needsMigration()) {
+            LOGGER.info("Chunkis [DEBUG]: Migrating chunk delta for {} to CIS8 format", chunk.getPos());
+            GlobalChunkTracker.addDelta(chunk.getPos(), delta);
+        }
+
         attachDeltaToChunk(chunk, delta);
         resetChunkStatusForRegeneration(chunk);
     }
@@ -87,9 +99,11 @@ public class ChunkSerializerMixin {
     /**
      * Loads a chunk delta using a two-tier strategy: memory-first, then disk.
      *
-     * <p>Checks GlobalChunkTracker first to handle chunks that were recently marked
+     * <p>
+     * Checks GlobalChunkTracker first to handle chunks that were recently marked
      * dirty but may not have been persisted yet. This prevents data loss during
-     * rapid unload/reload cycles. Falls back to disk storage if not found in memory.
+     * rapid unload/reload cycles. Falls back to disk storage if not found in
+     * memory.
      *
      * @param position the chunk position to load delta for
      * @param world    the server world context
@@ -101,12 +115,20 @@ public class ChunkSerializerMixin {
         // Tier 1: Check in-memory tracker (handles race conditions)
         var delta = loadDeltaFromMemory(position);
         if (delta != null) {
-            LOGGER.info("Chunkis: Loaded delta from GlobalChunkTracker for {}", position);
+            LOGGER.info("Chunkis [DEBUG]: Loaded delta from GlobalChunkTracker for {} (Size: {} blocks)",
+                    position, delta.getBlockInstructions().size());
             return delta;
         }
 
         // Tier 2: Load from persistent storage
-        return loadDeltaFromDisk(position, world);
+        var diskDelta = loadDeltaFromDisk(position, world);
+        if (diskDelta != null) {
+            LOGGER.info("Chunkis [DEBUG]: Loaded delta from DISK for {} (Size: {} blocks)",
+                    position, diskDelta.getBlockInstructions().size());
+        } else {
+            LOGGER.info("Chunkis [DEBUG]: No delta found on disk for {}", position);
+        }
+        return diskDelta;
     }
 
     /**
@@ -118,15 +140,10 @@ public class ChunkSerializerMixin {
     @Unique
     @SuppressWarnings("rawtypes")
     private static ChunkDelta loadDeltaFromMemory(ChunkPos position) {
-        var trackedChunk = GlobalChunkTracker.getDirtyChunk(position);
-
-        if (trackedChunk instanceof ChunkisDeltaDuck deltaProvider) {
-            var delta = deltaProvider.chunkis$getDelta();
-            if (delta != null && !delta.isEmpty()) {
-                return delta;
-            }
+        var delta = GlobalChunkTracker.getDelta(position);
+        if (delta != null && !delta.isEmpty()) {
+            return delta;
         }
-
         return null;
     }
 
@@ -148,7 +165,8 @@ public class ChunkSerializerMixin {
     /**
      * Attaches a delta to a ProtoChunk for downstream processing.
      *
-     * <p>The delta is stored via the ChunkisDeltaDuck interface, making it available
+     * <p>
+     * The delta is stored via the ChunkisDeltaDuck interface, making it available
      * to subsequent mixins (e.g., WorldChunkMixin) that handle terrain generation.
      *
      * @param chunk the chunk to attach the delta to
@@ -165,7 +183,8 @@ public class ChunkSerializerMixin {
     /**
      * Resets chunk status to EMPTY to trigger the generation pipeline.
      *
-     * <p>This forces Minecraft to regenerate the chunk's terrain, allowing the
+     * <p>
+     * This forces Minecraft to regenerate the chunk's terrain, allowing the
      * Chunkis system to apply the delta during generation rather than as a
      * post-processing step. This ensures proper integration with worldgen features.
      *

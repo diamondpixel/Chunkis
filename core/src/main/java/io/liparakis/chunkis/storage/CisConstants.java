@@ -20,10 +20,10 @@ public final class CisConstants {
 
     /**
      * Current CIS format version.
-     * V7: Fixed dense encoding data loss by forcing full sparse support.
+     * V8: Increased palette bit width to 12 bits to support 4096 unique blocks.
      * Increment when making breaking changes to the serialization format.
      */
-    public static final int VERSION = 7;
+    public static final int VERSION = 8;
 
     // ==================== Section Geometry ====================
 
@@ -74,21 +74,20 @@ public final class CisConstants {
     public static final int MAX_CACHED_REGIONS = 64;
 
     /**
-     * Threshold for sparse-to-dense storage conversion (4097 blocks).
-     * Sections with fewer blocks use sparse storage (hash map).
-     * Disabled in V7 (threshold > max volume) to prevent dense encoding data loss.
+     * Threshold for sparse-to-dense storage conversion (512 blocks).
+     * Sections with more than this many modified blocks use dense storage (flat
+     * array).
      */
-    public static final int SPARSE_DENSE_THRESHOLD = 4097;
+    public static final int SPARSE_DENSE_THRESHOLD = 512;
 
     /**
-     * Maximum capacity for sparse storage before forcing conversion/resize (4097
-     * blocks).
+     * Maximum capacity for sparse storage before forcing a conversion to dense.
      */
-    public static final int MAX_SPARSE_CAPACITY = 4097;
+    public static final int MAX_SPARSE_CAPACITY = 512;
 
     // ==================== Serialization Bit Widths ====================
 
-    public static final int PALETTE_SIZE_BITS = 8;
+    public static final int PALETTE_SIZE_BITS = 12; // Supports up to 4096 unique blocks per section
     public static final int SECTION_Y_BITS = 6; // ZigZag encoded
     public static final int BLOCK_COUNT_BITS = 13;
 

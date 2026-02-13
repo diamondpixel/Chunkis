@@ -17,8 +17,6 @@ import java.awt.*;
  * Layout: 3-pane (Tree | Main View | Stats).
  */
 public class CisInspector extends JPanel {
-    private final JBSplitter mainSplitter;
-    private final JBSplitter contentSplitter;
 
     // Components
     private final JTree navigationTree;
@@ -30,7 +28,6 @@ public class CisInspector extends JPanel {
     private final PaletteView paletteView;
     private final SectionView sectionView;
     private final JPanel headerView;
-    private final JPanel emptyView;
 
     // Data
     private CisStats currentStats;
@@ -48,7 +45,7 @@ public class CisInspector extends JPanel {
         centerLayout = new CardLayout();
         centerPanel = new JPanel(centerLayout);
 
-        emptyView = new JPanel(new GridBagLayout());
+        JPanel emptyView = new JPanel(new GridBagLayout());
         emptyView.add(new JLabel("Select a node to view details"));
 
         paletteView = new PaletteView();
@@ -67,11 +64,11 @@ public class CisInspector extends JPanel {
 
         // Layout Assembly using nested JBSplitter for 3-pane effect
         // Left | (Center | Right)
-        contentSplitter = new JBSplitter(false, 0.7f);
+        JBSplitter contentSplitter = new JBSplitter(false, 0.7f);
         contentSplitter.setFirstComponent(centerPanel);
         contentSplitter.setSecondComponent(statsScroll);
 
-        mainSplitter = new JBSplitter(false, 0.25f);
+        JBSplitter mainSplitter = new JBSplitter(false, 0.25f);
         mainSplitter.setFirstComponent(treeScroll);
         mainSplitter.setSecondComponent(contentSplitter);
 

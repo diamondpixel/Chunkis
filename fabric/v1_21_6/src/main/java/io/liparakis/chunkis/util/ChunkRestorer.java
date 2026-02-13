@@ -19,23 +19,29 @@ import org.slf4j.Logger;
 /**
  * Utility for restoring chunks from Chunkis delta data.
  *
- * <p>Applies player modifications stored in {@link ChunkDelta} to freshly generated
- * {@link WorldChunk} instances. This restoration process is critical for maintaining
+ * <p>
+ * Applies player modifications stored in {@link ChunkDelta} to freshly
+ * generated
+ * {@link WorldChunk} instances. This restoration process is critical for
+ * maintaining
  * player-made changes across world reloads and chunk regeneration.
  *
- * <p><b>Restoration Process:</b>
+ * <p>
+ * <b>Restoration Process:</b>
  * <ol>
- *   <li>Validates each delta entry against vanilla snapshot (optimization)</li>
- *   <li>Applies block state changes to chunk sections</li>
- *   <li>Restores block entities (chests, furnaces, etc.)</li>
- *   <li>Spawns entities saved in the delta</li>
- *   <li>Copies validated changes to runtime delta for future saves</li>
+ * <li>Validates each delta entry against vanilla snapshot (optimization)</li>
+ * <li>Applies block state changes to chunk sections</li>
+ * <li>Restores block entities (chests, furnaces, etc.)</li>
+ * <li>Spawns entities saved in the delta</li>
+ * <li>Copies validated changes to runtime delta for future saves</li>
  * </ol>
  *
- * <p><b>Thread Safety:</b> All methods must execute on the server thread.
+ * <p>
+ * <b>Thread Safety:</b> All methods must execute on the server thread.
  * Entity spawning and chunk modification are not thread-safe.
  *
- * <p><b>Optimization:</b> Uses {@link VanillaChunkSnapshot} to skip redundant
+ * <p>
+ * <b>Optimization:</b> Uses {@link VanillaChunkSnapshot} to skip redundant
  * restorations when delta matches worldgen output (automatic delta cleanup).
  *
  * @author Liparakis
@@ -53,15 +59,17 @@ public final class ChunkRestorer {
     /**
      * Restores a chunk from delta data with automatic optimization.
      *
-     * <p>Applies all modifications from the proto delta to the world chunk,
+     * <p>
+     * Applies all modifications from the proto delta to the world chunk,
      * while simultaneously validating against the vanilla snapshot. Redundant
      * entries (where delta matches vanilla) are automatically cleaned up.
      *
-     * <p><b>Parameters:</b>
+     * <p>
+     * <b>Parameters:</b>
      * <ul>
-     *   <li><b>protoDelta</b>: Source delta loaded from disk/memory</li>
-     *   <li><b>runtimeDelta</b>: Target delta for tracking active modifications</li>
-     *   <li><b>snapshot</b>: Vanilla state for optimization checks</li>
+     * <li><b>protoDelta</b>: Source delta loaded from disk/memory</li>
+     * <li><b>runtimeDelta</b>: Target delta for tracking active modifications</li>
+     * <li><b>snapshot</b>: Vanilla state for optimization checks</li>
      * </ul>
      *
      * @param world        the server world context
@@ -86,11 +94,13 @@ public final class ChunkRestorer {
     /**
      * Visitor implementation for processing delta entries during restoration.
      *
-     * <p>Validates each entry against the vanilla snapshot before applying,
+     * <p>
+     * Validates each entry against the vanilla snapshot before applying,
      * enabling automatic cleanup of redundant modifications. Copies validated
      * entries to the runtime delta for future persistence.
      *
-     * <p><b>Optimization Logic:</b> If a delta entry exactly matches the vanilla
+     * <p>
+     * <b>Optimization Logic:</b> If a delta entry exactly matches the vanilla
      * state, it's skipped (not copied to runtime delta), effectively removing
      * the redundant modification. This keeps deltas minimal over time.
      */
@@ -171,7 +181,8 @@ public final class ChunkRestorer {
     /**
      * Applies a single block state change to a chunk section.
      *
-     * <p>Directly modifies the chunk's palette storage for performance.
+     * <p>
+     * Directly modifies the chunk's palette storage for performance.
      * Validates section existence before modification to prevent crashes.
      *
      * @param chunk         the chunk to modify
@@ -214,11 +225,13 @@ public final class ChunkRestorer {
     /**
      * Restores a block entity from NBT data.
      *
-     * <p>Validates that the block state at the position supports block entities
+     * <p>
+     * Validates that the block state at the position supports block entities
      * before attempting restoration. This prevents errors when worldgen changes
      * cause block entity positions to become invalid.
      *
-     * <p><b>Note:</b> The block entity is removed and re-added rather than
+     * <p>
+     * <b>Note:</b> The block entity is removed and re-added rather than
      * updated in place to ensure all NBT data is properly applied.
      *
      * @param world         the server world
@@ -254,8 +267,7 @@ public final class ChunkRestorer {
                     worldPosition,
                     currentState,
                     nbt,
-                    world.getRegistryManager()
-            );
+                    world.getRegistryManager());
 
             if (blockEntity == null) {
                 LOGGER.warn("Failed to create block entity from NBT at {}", worldPosition);
@@ -278,11 +290,13 @@ public final class ChunkRestorer {
     /**
      * Restores and spawns an entity from NBT data.
      *
-     * <p>Checks for UUID conflicts before spawning to prevent duplicate entities.
+     * <p>
+     * Checks for UUID conflicts before spawning to prevent duplicate entities.
      * Uses Minecraft's built-in entity loading mechanism to handle all entity
      * types, including those with passengers.
      *
-     * <p><b>Thread Safety:</b> Must be called on server thread as entity
+     * <p>
+     * <b>Thread Safety:</b> Must be called on server thread as entity
      * spawning modifies world state.
      *
      * @param world         the server world to spawn into
@@ -300,8 +314,7 @@ public final class ChunkRestorer {
             var readView = NbtReadView.create(
                     ErrorReporter.EMPTY,
                     world.getRegistryManager(),
-                    nbt
-            );
+                    nbt);
 
             EntityType.loadEntityWithPassengers(readView, world, SpawnReason.LOAD, entity -> {
                 // Prevent duplicate entities if UUID already exists

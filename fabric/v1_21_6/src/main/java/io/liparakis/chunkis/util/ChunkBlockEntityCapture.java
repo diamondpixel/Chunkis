@@ -14,19 +14,22 @@ import org.slf4j.Logger;
 /**
  * Handles block entity capture during chunk persistence.
  *
- * <p>Captures all block entities (chests, furnaces, signs, spawners, etc.) from
+ * <p>
+ * Captures all block entities (chests, furnaces, signs, spawners, etc.) from
  * a chunk and serializes them into delta storage. This preserves both vanilla
  * worldgen block entities and player-placed modifications.
  *
- * <p><b>Performance Optimizations:</b>
+ * <p>
+ * <b>Performance Optimizations:</b>
  * <ul>
- *   <li>Single-pass iteration over block entities (O(n))</li>
- *   <li>Bitwise AND for local coordinate conversion (faster than modulo)</li>
- *   <li>Early exit for removed/invalid block entities</li>
- *   <li>Cached registry manager (no repeated lookups)</li>
+ * <li>Single-pass iteration over block entities (O(n))</li>
+ * <li>Bitwise AND for local coordinate conversion (faster than modulo)</li>
+ * <li>Early exit for removed/invalid block entities</li>
+ * <li>Cached registry manager (no repeated lookups)</li>
  * </ul>
  *
- * <p><b>Thread Safety:</b> Must be called on server thread as it accesses
+ * <p>
+ * <b>Thread Safety:</b> Must be called on server thread as it accesses
  * chunk world state and block entity data.
  *
  * @author Liparakis
@@ -43,15 +46,18 @@ public final class ChunkBlockEntityCapture {
     /**
      * Captures all block entities from a chunk into its delta.
      *
-     * <p>Serializes each block entity to NBT format, preserving:
+     * <p>
+     * Serializes each block entity to NBT format, preserving:
      * <ul>
-     *   <li>Inventory contents (chests, furnaces, hoppers, shulker boxes)</li>
-     *   <li>Custom data (signs, command blocks, spawners, lecterns)</li>
-     *   <li>State information (brewing stands, beacons, comparators)</li>
+     * <li>Inventory contents (chests, furnaces, hoppers, shulker boxes)</li>
+     * <li>Custom data (signs, command blocks, spawners, lecterns)</li>
+     * <li>State information (brewing stands, beacons, comparators)</li>
      * </ul>
      *
-     * <p>Skips removed or invalid block entities. Ensures all NBT compounds
-     * contain the required "id" field for proper deserialization during restoration.
+     * <p>
+     * Skips removed or invalid block entities. Ensures all NBT compounds
+     * contain the required "id" field for proper deserialization during
+     * restoration.
      *
      * @param chunk the chunk to capture block entities from
      * @param delta the delta to store serialized block entity data
@@ -73,7 +79,8 @@ public final class ChunkBlockEntityCapture {
     /**
      * Captures a single block entity and adds it to the delta.
      *
-     * <p>Validates the block entity, serializes it to NBT, ensures proper ID field,
+     * <p>
+     * Validates the block entity, serializes it to NBT, ensures proper ID field,
      * and stores it with local chunk coordinates.
      *
      * @param blockEntity     the block entity to capture
@@ -101,7 +108,8 @@ public final class ChunkBlockEntityCapture {
     /**
      * Serializes a block entity to NBT format with proper ID field.
      *
-     * <p>Uses the chunk world's registry manager for proper serialization.
+     * <p>
+     * Uses the chunk world's registry manager for proper serialization.
      * Ensures the NBT contains the required "id" field by adding it if missing.
      * This ID is critical for Minecraft's deserialization system.
      *
@@ -133,7 +141,8 @@ public final class ChunkBlockEntityCapture {
     /**
      * Stores a block entity's NBT data in the delta using local chunk coordinates.
      *
-     * <p>Converts world coordinates to local chunk coordinates (0-15 for X/Z)
+     * <p>
+     * Converts world coordinates to local chunk coordinates (0-15 for X/Z)
      * using bitwise AND for optimal performance.
      *
      * @param worldPosition the absolute block position

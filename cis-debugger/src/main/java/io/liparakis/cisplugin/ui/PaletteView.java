@@ -13,7 +13,6 @@ import java.util.Map;
  * Displays the global palette usage in a table.
  */
 public class PaletteView extends JPanel {
-    private final JBTable table;
     private final DefaultTableModel model;
 
     public PaletteView() {
@@ -27,7 +26,7 @@ public class PaletteView extends JPanel {
             }
         };
 
-        table = new JBTable(model);
+        JBTable table = new JBTable(model);
         table.setAutoCreateRowSorter(true);
         add(new JBScrollPane(table), BorderLayout.CENTER);
     }

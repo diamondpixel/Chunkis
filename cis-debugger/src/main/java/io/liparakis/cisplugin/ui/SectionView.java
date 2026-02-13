@@ -14,11 +14,9 @@ import java.awt.*;
  * Contains Summary, Block List, and Voxel Slice visualization.
  */
 public class SectionView extends JPanel {
-    private final JBTabbedPane tabs;
 
     // Sub-components
     private final JPanel summaryPanel;
-    private final JBTable blockListTable;
     private final DefaultTableModel blockListModel;
     private final SliceView sliceView;
     private final JSlider layerSlider;
@@ -26,7 +24,7 @@ public class SectionView extends JPanel {
 
     public SectionView() {
         setLayout(new BorderLayout());
-        tabs = new JBTabbedPane();
+        JBTabbedPane tabs = new JBTabbedPane();
 
         // 1. Summary Tab
         summaryPanel = new JPanel();
@@ -36,7 +34,7 @@ public class SectionView extends JPanel {
 
         // 2. Block List Tab
         blockListModel = new DefaultTableModel(new String[] { "X", "Y", "Z", "Block" }, 0);
-        blockListTable = new JBTable(blockListModel);
+        JBTable blockListTable = new JBTable(blockListModel);
         tabs.addTab("Block List", new JBScrollPane(blockListTable));
 
         // 3. Slice View Tab

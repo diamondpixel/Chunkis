@@ -48,6 +48,9 @@ public abstract class AbstractCisDecoder<S, N> {
     /** Reusable buffer for local palette indices in dense sections. */
     protected final int[] localPaletteBuffer;
 
+    /** The format version of the data being decoded. */
+    protected int decodedVersion;
+
     /** The global palette mapping indices to BlockStates. */
     protected List<S> globalPalette;
 
@@ -88,6 +91,10 @@ public abstract class AbstractCisDecoder<S, N> {
         offset = decodeSections(data, offset, delta);
         decodeBlockEntitiesAndEntities(data, offset, delta);
 
+        if (decodedVersion < CisConstants.VERSION) {
+            delta.setNeedsMigration(true);
+        }
+
         delta.markSaved();
         return delta;
     }
@@ -100,11 +107,11 @@ public abstract class AbstractCisDecoder<S, N> {
                     magic, CisConstants.MAGIC));
         }
 
-        int version = readIntBE(data, 4);
-        if (version != CisConstants.VERSION) {
+        this.decodedVersion = readIntBE(data, 4);
+        if (decodedVersion < 7 || decodedVersion > CisConstants.VERSION) {
             throw new IOException(String.format(
-                    "Unsupported CIS version: %d (expected: %d)",
-                    version, CisConstants.VERSION));
+                    "Unsupported CIS version: %d (expected 7 or %d)",
+                    decodedVersion, CisConstants.VERSION));
         }
 
         return HEADER_SIZE;
@@ -194,7 +201,8 @@ public abstract class AbstractCisDecoder<S, N> {
      * Decodes a dense section (full 16x16x16 array).
      */
     private void decodeDenseSection(BitReader reader, ChunkDelta<S, N> delta, int sectionY, int globalBits) {
-        int localSize = (int) reader.read(8);
+        int paletteBits = (decodedVersion == 7) ? 8 : CisConstants.PALETTE_SIZE_BITS;
+        int localSize = (int) reader.read(paletteBits);
 
         // Read local palette (maps local indices to global indices)
         for (int i = 0; i < localSize; i++) {
@@ -275,7 +283,8 @@ public abstract class AbstractCisDecoder<S, N> {
             }
 
         } catch (IOException e) {
-            io.liparakis.chunkis.Chunkis.LOGGER.warn("Failed to decode block/entity data at offset {}: {}", offset, e.getMessage());
+            io.liparakis.chunkis.Chunkis.LOGGER.warn("Failed to decode block/entity data at offset {}: {}", offset,
+                    e.getMessage());
         }
     }
 

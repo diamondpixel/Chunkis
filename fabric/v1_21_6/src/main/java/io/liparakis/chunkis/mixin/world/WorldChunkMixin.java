@@ -24,21 +24,31 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import org.slf4j.Logger;
 
 /**
- * Mixin for {@link WorldChunk} implementing player modification tracking and restoration.
+ * Mixin for {@link WorldChunk} implementing player modification tracking and
+ * restoration.
  *
- * <p>Provides the core functionality for Chunkis delta-based chunk modification system:
+ * <p>
+ * Provides the core functionality for Chunkis delta-based chunk modification
+ * system:
  * <ul>
- *   <li>Intercepts block changes to track player modifications in {@link ChunkDelta}</li>
- *   <li>Restores saved modifications when chunks are promoted from ProtoChunk</li>
- *   <li>Uses {@link VanillaChunkSnapshot} to distinguish player changes from worldgen</li>
- *   <li>Integrates with {@link GlobalChunkTracker} for reliable persistence</li>
+ * <li>Intercepts block changes to track player modifications in
+ * {@link ChunkDelta}</li>
+ * <li>Restores saved modifications when chunks are promoted from
+ * ProtoChunk</li>
+ * <li>Uses {@link VanillaChunkSnapshot} to distinguish player changes from
+ * worldgen</li>
+ * <li>Integrates with {@link GlobalChunkTracker} for reliable persistence</li>
  * </ul>
  *
- * <p><b>Thread Safety:</b> All block change tracking is restricted to the server thread
- * to prevent concurrent modification issues. Natural processes (leaf decay) are filtered
+ * <p>
+ * <b>Thread Safety:</b> All block change tracking is restricted to the server
+ * thread
+ * to prevent concurrent modification issues. Natural processes (leaf decay) are
+ * filtered
  * to avoid polluting the delta with non-player changes.
  *
- * <p><b>Note:</b> This mixin relies on {@link CommonChunkMixin} applying the
+ * <p>
+ * <b>Note:</b> This mixin relies on {@link CommonChunkMixin} applying the
  * {@link ChunkisDeltaDuck} interface to the base chunk class.
  *
  * @author Liparakis
@@ -76,17 +86,20 @@ public class WorldChunkMixin {
     /**
      * Intercepts block state changes to track player modifications.
      *
-     * <p>This method implements sophisticated filtering to ensure only genuine player
+     * <p>
+     * This method implements sophisticated filtering to ensure only genuine player
      * modifications are tracked:
      * <ul>
-     *   <li>Ignores client-side changes (no delta on client)</li>
-     *   <li>Ignores changes during restoration (prevents recursion)</li>
-     *   <li>Ignores changes before chunk is fully generated (FULL status required)</li>
-     *   <li>Ignores natural leaf decay (tracked via LeafTickContext)</li>
-     *   <li>Ignores changes from non-server threads (thread safety)</li>
+     * <li>Ignores client-side changes (no delta on client)</li>
+     * <li>Ignores changes during restoration (prevents recursion)</li>
+     * <li>Ignores changes before chunk is fully generated (FULL status
+     * required)</li>
+     * <li>Ignores natural leaf decay (tracked via LeafTickContext)</li>
+     * <li>Ignores changes from non-server threads (thread safety)</li>
      * </ul>
      *
-     * <p>When a block is reverted to its vanilla state, the delta entry is removed.
+     * <p>
+     * When a block is reverted to its vanilla state, the delta entry is removed.
      * When a block differs from vanilla, it's recorded in the delta and the chunk
      * is marked dirty in GlobalChunkTracker.
      *
@@ -114,7 +127,8 @@ public class WorldChunkMixin {
     /**
      * Determines whether a block change should be tracked in the delta.
      *
-     * <p>Applies multiple filters to exclude non-player or inappropriate changes.
+     * <p>
+     * Applies multiple filters to exclude non-player or inappropriate changes.
      *
      * @param chunk    the chunk being modified
      * @param position the block position
@@ -183,10 +197,11 @@ public class WorldChunkMixin {
     /**
      * Records a block change in the chunk delta.
      *
-     * <p>Compares the new state against the vanilla snapshot:
+     * <p>
+     * Compares the new state against the vanilla snapshot:
      * <ul>
-     *   <li>If matching vanilla: removes delta entry (reversion)</li>
-     *   <li>If different from vanilla: adds/updates delta entry</li>
+     * <li>If matching vanilla: removes delta entry (reversion)</li>
+     * <li>If different from vanilla: adds/updates delta entry</li>
      * </ul>
      *
      * @param chunk    the chunk being modified
@@ -251,18 +266,21 @@ public class WorldChunkMixin {
     }
 
     /**
-     * Intercepts WorldChunk construction from ProtoChunk to restore saved modifications.
+     * Intercepts WorldChunk construction from ProtoChunk to restore saved
+     * modifications.
      *
-     * <p>Executes the following restoration workflow:
+     * <p>
+     * Executes the following restoration workflow:
      * <ol>
-     *   <li>Captures a vanilla snapshot from the ProtoChunk (worldgen state)</li>
-     *   <li>Retrieves the delta from the ProtoChunk (loaded from disk/memory)</li>
-     *   <li>Applies all delta modifications to the WorldChunk</li>
-     *   <li>Optimizes the delta by removing redundant entries</li>
-     *   <li>Registers the chunk with GlobalChunkTracker for dirty tracking</li>
+     * <li>Captures a vanilla snapshot from the ProtoChunk (worldgen state)</li>
+     * <li>Retrieves the delta from the ProtoChunk (loaded from disk/memory)</li>
+     * <li>Applies all delta modifications to the WorldChunk</li>
+     * <li>Optimizes the delta by removing redundant entries</li>
+     * <li>Registers the chunk with GlobalChunkTracker for dirty tracking</li>
      * </ol>
      *
-     * <p>The re-entrancy guard {@link #chunkis$isRestoring} prevents modifications
+     * <p>
+     * The re-entrancy guard {@link #chunkis$isRestoring} prevents modifications
      * made during restoration from being tracked as player changes.
      *
      * @param world        the server world context
@@ -270,10 +288,7 @@ public class WorldChunkMixin {
      * @param entityLoader the entity loader (unused)
      * @param ci           callback info
      */
-    @Inject(
-            method = "<init>(Lnet/minecraft/server/world/ServerWorld;Lnet/minecraft/world/chunk/ProtoChunk;Lnet/minecraft/world/chunk/WorldChunk$EntityLoader;)V",
-            at = @At("RETURN")
-    )
+    @Inject(method = "<init>(Lnet/minecraft/server/world/ServerWorld;Lnet/minecraft/world/chunk/ProtoChunk;Lnet/minecraft/world/chunk/WorldChunk$EntityLoader;)V", at = @At("RETURN"))
     private void chunkis$onConstructFromProto(
             ServerWorld world,
             ProtoChunk protoChunk,
@@ -316,8 +331,7 @@ public class WorldChunkMixin {
                     chunk,
                     protoDelta,
                     chunkDelta,
-                    chunkis$vanillaSnapshot
-            );
+                    chunkis$vanillaSnapshot);
 
             if (wasOptimized) {
                 chunkDelta.markDirty();

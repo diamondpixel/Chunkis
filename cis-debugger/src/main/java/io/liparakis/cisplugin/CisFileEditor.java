@@ -33,7 +33,6 @@ public final class CisFileEditor extends UserDataHolderBase implements FileEdito
     private final JBList<RegionFileReader.ChunkEntry> chunkList;
     private final DefaultListModel<RegionFileReader.ChunkEntry> chunkListModel;
     private final CisInspector inspector;
-    private final JBSplitter splitter;
     private final JTextArea statusArea;
 
     // Logic
@@ -58,9 +57,9 @@ public final class CisFileEditor extends UserDataHolderBase implements FileEdito
         this.inspector = new CisInspector();
 
         // 3. Splitter
-        this.splitter = new JBSplitter(false, 0.2f);
-        this.splitter.setFirstComponent(listPanel);
-        this.splitter.setSecondComponent(inspector);
+        JBSplitter splitter = new JBSplitter(false, 0.2f);
+        splitter.setFirstComponent(listPanel);
+        splitter.setSecondComponent(inspector);
 
         // 4. Status Bar
         this.statusArea = new JTextArea(1, 40);

@@ -73,6 +73,12 @@ public final class ChunkDelta<S, N> {
      */
     private boolean isDirty;
 
+    /**
+     * Tracks whether this delta was loaded from an older CIS version
+     * and should be re-saved in the current version.
+     */
+    private boolean needsMigration;
+
     private final Predicate<S> isEmptyState;
 
     /**
@@ -89,6 +95,7 @@ public final class ChunkDelta<S, N> {
         this.positionMap.defaultReturnValue(-1);
         this.entities = new ArrayList<>();
         this.isDirty = false;
+        this.needsMigration = false;
         this.isEmptyState = isEmptyState;
     }
 
@@ -198,7 +205,7 @@ public final class ChunkDelta<S, N> {
     /**
      * Removes a block change instruction at the specified position.
      */
-    public void removeBlockChange(int x, int y, int z) {
+    public synchronized void removeBlockChange(int x, int y, int z) {
         final long posKey = BlockInstruction.packPos(x, y, z);
         final int index = positionMap.get(posKey);
 
@@ -331,7 +338,7 @@ public final class ChunkDelta<S, N> {
 
     // ==================== Queries ====================
 
-    public List<BlockInstruction> getBlockInstructions() {
+    public synchronized List<BlockInstruction> getBlockInstructions() {
         final List<BlockInstruction> list = new ArrayList<>(instructionCount);
         for (int i = 0; i < instructionCount; i++) {
             list.add(BlockInstruction.fromPacked(packedInstructions[i]));
@@ -361,6 +368,15 @@ public final class ChunkDelta<S, N> {
 
     public void markSaved() {
         this.isDirty = false;
+        this.needsMigration = false;
+    }
+
+    public boolean needsMigration() {
+        return needsMigration;
+    }
+
+    public void setNeedsMigration(boolean needsMigration) {
+        this.needsMigration = needsMigration;
     }
 
     // ==================== Visitor ====================

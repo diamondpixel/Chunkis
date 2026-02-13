@@ -47,13 +47,11 @@ public final class CisFileData {
     public static final class SectionData {
         private final int sectionY;
         private final boolean sparse;
-        private final int blockCount;
         private final List<BlockEntry> blocks;
 
         public SectionData(int sectionY, boolean sparse, int blockCount, List<BlockEntry> blocks) {
             this.sectionY = sectionY;
             this.sparse = sparse;
-            this.blockCount = blockCount;
             this.blocks = blocks;
         }
 

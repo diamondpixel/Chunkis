@@ -32,8 +32,6 @@ import io.liparakis.chunkis.util.LeafTickContext.ContextHandle;
  *
  * <p>
  * <b>Performance:</b> ~40 ns overhead per leaf tick (2 ThreadLocal operations).
- * <p>
- * <b>Performance:</b> ~40 ns overhead per leaf tick (2 ThreadLocal operations).
  * </p>
  *
  * @author Liparakis

@@ -1,22 +1,26 @@
 package io.liparakis.chunkis.util;
 
-import io.liparakis.chunkis.core.ChunkDelta;
 import io.liparakis.chunkis.api.ChunkisDeltaDuck;
+import io.liparakis.chunkis.core.ChunkDelta;
 import net.minecraft.util.math.ChunkPos;
 import net.minecraft.world.chunk.WorldChunk;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.Map;
+
 import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Global registry for tracking dirty chunk deltas that require persistence.
  *
  * <p>
- * This tracker prevents data loss during rapid disconnect/reconnect cycles
- * by keeping dirty deltas in memory even after chunks are unloaded.
+ * Uses a combination of a dirty delta map (for active chunks) and a
+ * size-limited
+ * LRU cache (for recently unloaded chunks) to ensure deltas survive the
+ * critical
+ * unload-reload gap during player disconnects.
  *
- * <p>
- * Thread-safe for concurrent access.
+ * @author io.liparakis
+ * @since 1.0
  */
 public class GlobalChunkTracker {
     /**
@@ -35,9 +39,8 @@ public class GlobalChunkTracker {
      * Cache for recently unloaded deltas to prevent memory leaks while
      * ensuring they survive the critical re-join window.
      */
-    private static final Map<Long, ChunkDelta<?, ?>> unloadCache = new LinkedHashMap<>(
-            MAX_CACHE_SIZE, 0.75f,
-            true) {
+    private static final Map<Long, ChunkDelta<?, ?>> unloadCache = new LinkedHashMap<Long, ChunkDelta<?, ?>>(
+            MAX_CACHE_SIZE, 0.75f, true) {
         @Override
         protected boolean removeEldestEntry(Map.Entry<Long, ChunkDelta<?, ?>> eldest) {
             return size() > MAX_CACHE_SIZE;
@@ -47,14 +50,14 @@ public class GlobalChunkTracker {
     private static final org.slf4j.Logger LOGGER = io.liparakis.chunkis.Chunkis.LOGGER;
 
     /**
-     * Marks a chunk's delta as dirty and tracks it for persistence.
+     * Marks a chunk's delta as dirty and ensures it's cached.
      */
     public static void markDirty(WorldChunk chunk) {
         if (!(chunk instanceof ChunkisDeltaDuck deltaDuck))
             return;
 
         ChunkDelta<?, ?> delta = deltaDuck.chunkis$getDelta();
-        if (delta == null)
+        if (delta == null || delta.isEmpty())
             return;
 
         long chunkKey = chunk.getPos().toLong();
@@ -101,8 +104,7 @@ public class GlobalChunkTracker {
     }
 
     /**
-     * Removes a delta from the tracker once it has been successfully persisted to
-     * disk.
+     * Removes a delta from tracking once it has been successfully saved to disk.
      */
     public static void markSaved(ChunkPos position) {
         long chunkKey = position.toLong();
